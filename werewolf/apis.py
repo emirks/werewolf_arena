@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 from openai import OpenAI
 import os
 
@@ -20,6 +21,12 @@ import google
 import vertexai
 from vertexai.preview import generative_models
 from anthropic import AnthropicVertex
+
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
+
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 
 def generate(model, **kwargs):
@@ -32,9 +39,9 @@ def generate(model, **kwargs):
 
 
 # openai
-def generate_openai(model: str, prompt: str, json_mode: bool = True, **kwargs):
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-
+def generate_openai(
+    model: str, prompt: str, json_mode: bool = True, temperature: float = 1.0, **kwargs
+):
     response_format = {"type": "text"}
     if json_mode:
         response_format = {"type": "json_object"}
@@ -42,6 +49,7 @@ def generate_openai(model: str, prompt: str, json_mode: bool = True, **kwargs):
         messages=[{"role": "user", "content": prompt}],
         response_format=response_format,
         model=model,
+        temperature=temperature,
     )
 
     txt = response.choices[0].message.content
