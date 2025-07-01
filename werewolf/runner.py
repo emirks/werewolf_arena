@@ -25,18 +25,16 @@ import tqdm
 
 from werewolf import logging
 from werewolf import game
-from werewolf.model import Doctor
-from werewolf.model import SEER
-from werewolf.model import Seer
+from werewolf.model import Seer, Doctor, Villager, Werewolf
+from werewolf.model import SEER, DOCTOR, VILLAGER, WEREWOLF
 from werewolf.model import State
-from werewolf.model import Villager
-from werewolf.model import WEREWOLF
-from werewolf.model import Werewolf
+from werewolf.model import HumanPlayer
 from werewolf.config import get_player_names
 
 _RUN_GAME = flags.DEFINE_boolean("run", False, "Runs a single game.")
 _RESUME = flags.DEFINE_boolean("resume", False, "Resumes games.")
 _EVAL = flags.DEFINE_boolean("eval", False, "Collect eval data by running many games.")
+_PLAY = flags.DEFINE_boolean("play", False, "Run a game with a human player.")
 _NUM_GAMES = flags.DEFINE_integer(
     "num_games", 2, "Number of games to run used with eval."
 )
@@ -57,45 +55,79 @@ RESUME_DIRECTORIES = []
 
 model_to_id = {
     "pro1.5": "gemini-1.5-pro-preview-0514",
-    "flash": "gemini-1.5-flash-001",
+    "flash": "gemini-2.0-flash-001",
     "pro1": "gemini-pro",
     "gpt4": "gpt-4-turbo-2024-04-09",
-    "gpt4o": "gpt-4o-2024-05-13",
+    "gpt4o": "gpt-4o-2024-08-06",
     "gpt3.5": "gpt-3.5-turbo-0125",
 }
 
 
 def initialize_players(
-    villager_model: str, werewolf_model: str
+    villager_model: str, werewolf_model: str, human_player: bool = False
 ) -> Tuple[Seer, Doctor, List[Villager], List[Werewolf]]:
     """Assigns roles to players and initializes their game view."""
 
     player_names = get_player_names()
     random.shuffle(player_names)
 
-    seer = Seer(
-        name=player_names.pop(),
-        model=villager_model,
-        # personality="You are cunning.",
-    )
+    human_name = None
+    if human_player:
+        human_name = player_names.pop()
+        print(f"\nYou are playing as {human_name}.")
+
+    # Create all AI players first
+    seer = Seer(name=player_names.pop(), model=villager_model)
     doctor = Doctor(name=player_names.pop(), model=villager_model)
     werewolves = [
         Werewolf(name=player_names.pop(), model=werewolf_model) for _ in range(2)
     ]
     villagers = [Villager(name=name, model=villager_model) for name in player_names]
 
-    # Initialize game view for all players
-    for player in [seer, doctor] + werewolves + villagers:
-        other_wolf = (
-            next((w.name for w in werewolves if w != player), None)
-            if isinstance(player, Werewolf)
-            else None
+    all_players = [seer, doctor] + werewolves + villagers
+
+    if human_player:
+        # Pick a random AI player to replace with a human
+        ai_to_replace = random.choice(all_players)
+        print(f"You have been assigned the role: {ai_to_replace.role}")
+
+        # Create the HumanPlayer instance
+        human = HumanPlayer(
+            name=human_name, role=ai_to_replace.role, model="human"  # Not used
         )
+
+        # Reconstruct the role-specific lists by swapping the AI for the Human
+        if ai_to_replace.role == SEER:
+            seer = human
+        elif ai_to_replace.role == DOCTOR:
+            doctor = human
+        elif ai_to_replace.role == WEREWOLF:
+            werewolves.remove(ai_to_replace)
+            werewolves.append(human)
+        else:  # Villager
+            villagers.remove(ai_to_replace)
+            villagers.append(human)
+        # Update the master list of players
+        all_players.remove(ai_to_replace)
+        all_players.append(human)
+
+    # Initialize game view for all players
+    current_player_names = [p.name for p in all_players]
+    # Correctly get the list of werewolves for setting up other_wolf
+    live_werewolves = [p for p in all_players if p.role == WEREWOLF]
+
+    for player in all_players:
+        other_wolf = None
+        if player.role == WEREWOLF:
+            other_wolf_player = next(
+                (w for w in live_werewolves if w.name != player.name), None
+            )
+            if other_wolf_player:
+                other_wolf = other_wolf_player.name
+
         tqdm.tqdm.write(f"{player.name} has role {player.role}")
         player.initialize_game_view(
-            current_players=player_names
-            + [seer.name, doctor.name]
-            + [w.name for w in werewolves],
+            current_players=current_player_names,
             round_number=0,
             other_wolf=other_wolf,
         )
@@ -203,15 +235,14 @@ def resume_games(directories: list[str]):
 
 
 def run_game(
-    werewolf_model: str,
-    villager_model: str,
+    werewolf_model: str, villager_model: str, human_player: bool = False
 ) -> Tuple[str, str]:
     """Runs a single game of Werewolf.
 
     Returns: (winner, log_dir)
     """
     seer, doctor, villagers, werewolves = initialize_players(
-        villager_model, werewolf_model
+        villager_model, werewolf_model, human_player
     )
     session_id = "10"  # You might want to make this unique per game
     state = State(
@@ -249,6 +280,15 @@ def run() -> None:
         run_game(
             werewolf_model=werewolf_model,
             villager_model=villager_model,
+        )
+    elif _PLAY.value:
+        villager_model, werewolf_model = model_combinations[0]
+        print("You are playing against the AI.")
+        print(f"Villagers: {villager_model} versus Werewolves: {werewolf_model}")
+        run_game(
+            werewolf_model=werewolf_model,
+            villager_model=villager_model,
+            human_player=True,
         )
     elif _EVAL.value:
         results = []
