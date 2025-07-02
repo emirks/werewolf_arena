@@ -17,11 +17,15 @@
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 import random
+import asyncio
+import os
 from typing import List
 
 import tqdm
+from livekit import api
 
-from werewolf.model import Round, RoundLog, State, VoteLog, HumanPlayer
+from werewolf.model import Round, RoundLog, State, VoteLog
+from werewolf.human_player import HumanPlayer
 from werewolf.config import MAX_DEBATE_TURNS, RUN_SYNTHETIC_VOTES
 
 
@@ -38,6 +42,7 @@ class GameMaster:
         self,
         state: State,
         num_threads: int = 1,
+        room_name: str = None,
     ) -> None:
         """Initialize the Werewolf game.
 
@@ -48,10 +53,49 @@ class GameMaster:
         self.num_threads = num_threads
         self.logs: List[RoundLog] = []
         self.human_player: HumanPlayer | None = None
+        self.room_name = room_name or f"werewolf_game_{state.session_id}"
+        
+        # Find human player
         for p in self.state.players.values():
             if isinstance(p, HumanPlayer):
                 self.human_player = p
                 break
+                
+        # Setup LiveKit API for room management
+        self.livekit_api_key = os.getenv("LIVEKIT_API_KEY")
+        self.livekit_api_secret = os.getenv("LIVEKIT_API_SECRET")
+        
+    # async def setup_livekit_room(self):
+    #     """Setup LiveKit room for all players."""
+    #     if not self.livekit_api_key or not self.livekit_api_secret:
+    #         tqdm.tqdm.write("LiveKit credentials not found, running without LiveKit")
+    #         return
+            
+    #     try:
+    #         # Create room if it doesn't exist
+    #         livekit_api = api.LiveKitAPI(
+    #             url=os.getenv("LIVEKIT_URL", "wss://localhost:7880"),
+    #             api_key=self.livekit_api_key,
+    #             api_secret=self.livekit_api_secret
+    #         )
+            
+    #         # Setup human player first if exists
+    #         if self.human_player:
+    #             token = self.human_player.setup_livekit_for_user(self.room_name)
+    #             tqdm.tqdm.write(f"Human player {self.human_player.name} LiveKit token ready")
+            
+    #         tqdm.tqdm.write(f"LiveKit room '{self.room_name}' setup complete")
+            
+    #     except Exception as e:
+    #         tqdm.tqdm.write(f"Error setting up LiveKit room: {e}")
+
+    async def broadcast_to_human(self, message_type: str, data=None):
+        """Broadcast message to human player if present."""
+        if self.human_player:
+            if message_type == "announcement":
+                await self.human_player.broadcast_announcement(data)
+            elif message_type == "game_state":
+                await self.human_player.send_game_state_update("game_state", data)
 
     @property
     def this_round(self) -> Round:
@@ -182,8 +226,17 @@ class GameMaster:
                 tqdm.tqdm.write(f"{player_name} summary: {summary}")
                 self.this_round_log.summaries.append((player_name, log))
 
-    def run_day_phase(self):
+    async def run_day_phase(self):
         """Run the day phase which consists of the debate and voting."""
+        
+        # Reset human player vote at start of day phase
+        if self.human_player:
+            self.human_player.reset_vote()
+            await self.human_player.send_game_state_update("day_phase_start", {
+                "round": self.current_round_num,
+                "players": self.this_round.players,
+                "phase": "debate"
+            })
 
         debate_ended_early = False
         for idx in range(MAX_DEBATE_TURNS):
@@ -193,21 +246,12 @@ class GameMaster:
             )
 
             if human_can_speak:
-                self.human_player._display_gamestate()
-                while True:
-                    speak_choice = input(
-                        "Do you want to speak? (y/n) or 'end' to finish debate: "
-                    ).lower()
-                    if speak_choice in ["y", "n", "end"]:
-                        break
-                    print("Invalid input. Please enter 'y', 'n', or 'end'.")
-
-                if speak_choice == "y":
+                # Check if human player wants to speak using LiveKit bid system
+                bid, log = await self.human_player.bid()
+                self.this_round_log.bid.append([(self.human_player.name, log)])
+                
+                if bid > 0:
                     next_speaker = self.human_player.name
-                elif speak_choice == "end":
-                    tqdm.tqdm.write(f"{self.human_player.name} has ended the debate.")
-                    debate_ended_early = True
-                    break
 
             if next_speaker is None:
                 next_speaker = self.get_next_speaker()
@@ -218,7 +262,7 @@ class GameMaster:
                 break
 
             player = self.state.players[next_speaker]
-            dialogue, log = player.debate()
+            dialogue, log = await player.debate()
             if dialogue is None:
                 raise ValueError(
                     f"{next_speaker} did not return a valid dialouge from debate()."
@@ -235,6 +279,14 @@ class GameMaster:
                 else:
                     raise ValueError(f"{name}.gamestate needs to be initialized.")
 
+            # Update human player with latest debate
+            if self.human_player:
+                await self.human_player.send_game_state_update("debate_update", {
+                    "speaker": next_speaker,
+                    "dialogue": dialogue,
+                    "turn": len(self.this_round.debate)
+                })
+
             # Synthetic votes are for AI-only simulations to see how votes shift.
             # This should not run during interactive play.
             if RUN_SYNTHETIC_VOTES and not self.human_player:
@@ -246,6 +298,11 @@ class GameMaster:
         # If we were running synthetic votes, the final vote is already captured.
         if not RUN_SYNTHETIC_VOTES or self.human_player:
             tqdm.tqdm.write("\nThe debate has concluded. Time to vote.")
+            if self.human_player:
+                await self.human_player.send_game_state_update("voting_phase", {
+                    "phase": "voting",
+                    "message": "The debate has concluded. Time to vote."
+                })
             votes, vote_logs = self.run_voting()
             self.this_round.votes.append(votes)
             self.this_round_log.votes.append(vote_logs)
@@ -279,7 +336,7 @@ class GameMaster:
 
         return votes, vote_log
 
-    def exile(self):
+    async def exile(self):
         """Exile the player who received the most votes."""
 
         most_voted, vote_count = Counter(
@@ -313,8 +370,11 @@ class GameMaster:
             player.add_announcement(announcement)
 
         tqdm.tqdm.write(announcement)
+        
+        # Broadcast to human player through LiveKit
+        await self.broadcast_to_human("announcement", announcement)
 
-    def resolve_night_phase(self):
+    async def resolve_night_phase(self):
         """Resolve elimination and protection during the night phase."""
         eliminated_player = self.this_round.eliminated
         protected_player = self.this_round.protected
@@ -340,8 +400,11 @@ class GameMaster:
         for name in self.this_round.players:
             player = self.state.players[name]
             player.add_announcement(announcement)
+            
+        # Broadcast to human player through LiveKit
+        await self.broadcast_to_human("announcement", announcement)
 
-    def run_round(self):
+    async def run_round(self):
         """Run a single round of the game."""
         self.state.rounds.append(Round())
         self.logs.append(RoundLog())
@@ -367,7 +430,10 @@ class GameMaster:
             (self.run_summaries, "The Players are summarizing the debate."),
         ]:
             tqdm.tqdm.write(message)
-            action()
+            if asyncio.iscoroutinefunction(action):
+                await action()
+            else:
+                action()
 
             if self.state.winner:
                 tqdm.tqdm.write(f"Round {self.current_round_num} is complete.")
@@ -393,11 +459,11 @@ class GameMaster:
         if self.state.winner:
             tqdm.tqdm.write(f"The winner is {self.state.winner}!")
 
-    def run_game(self) -> str:
+    async def run_game(self) -> str:
         """Run the entire Werewolf game and return the winner."""
         while not self.state.winner:
             tqdm.tqdm.write(f"STARTING ROUND: {self.current_round_num}")
-            self.run_round()
+            await self.run_round()
             for name in self.this_round.players:
                 if self.state.players[name].gamestate:
                     self.state.players[name].gamestate.round_number = (

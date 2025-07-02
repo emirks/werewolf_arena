@@ -9,11 +9,12 @@ from livekit.agents import tts
 from livekit.plugins import openai
 
 from werewolf.lm import LmLog
+from werewolf.utils import Deserializable
 
 logger = logging.getLogger(__name__)
 
 
-class LiveKitParticipant(ABC):
+class LiveKitParticipant(Deserializable):
     """Base class for LiveKit participants with TTS capability."""
     
     def __init__(self, name: str):
@@ -22,17 +23,19 @@ class LiveKitParticipant(ABC):
         self.session: agents.AgentSession = None
         self._connected = False
         
-    async def setup_livekit_session(self, ctx: agents.JobContext):
+    async def setup_livekit_session(self, room: rtc.Room):
         """Setup and connect to LiveKit room with TTS capabilities."""
         try:
             self.session = agents.AgentSession(
                 tts=openai.TTS()
             )
             
-            self.room = ctx.room
+            self.room = room
             await self.session.start(
-                room=ctx.room,
-                agent=agents.Agent(),
+                room=room,
+                agent=agents.Agent(
+                    instructions="You are a player in a game of werewolf. You will be given a transcript of the user's speech and you will need to transcribe it into text."
+                ),
             )
             self._connected = True
             logger.info(f"LiveKit session setup complete for {self.name}")

@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Werewolf Game</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #1a1a1a;
+            color: #ffffff;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .setup-panel, .game-panel {
+            background-color: #2a2a2a;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        input, select, button {
+            padding: 10px;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        
+        input, select {
+            background-color: #3a3a3a;
+            color: #ffffff;
+            width: 200px;
+        }
+        
+        button {
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        
+        button:hover {
+            background-color: #45a049;
+        }
+        
+        button:disabled {
+            background-color: #666;
+            cursor: not-allowed;
+        }
+        
+        .game-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .panel {
+            background-color: #3a3a3a;
+            padding: 15px;
+            border-radius: 8px;
+        }
+        
+        .debate-area {
+            background-color: #3a3a3a;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            height: 300px;
+            overflow-y: auto;
+        }
+        
+        .debate-message {
+            margin-bottom: 10px;
+            padding: 8px;
+            border-radius: 5px;
+            background-color: #4a4a4a;
+        }
+        
+        .action-area {
+            background-color: #3a3a3a;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .player-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .player-list li {
+            padding: 5px;
+            margin: 2px 0;
+            background-color: #4a4a4a;
+            border-radius: 3px;
+        }
+        
+        .status-message {
+            background-color: #2a4a2a;
+            border-left: 4px solid #4CAF50;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        
+        .error-message {
+            background-color: #4a2a2a;
+            border-left: 4px solid #f44336;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        
+        .vote-button, .action-button {
+            background-color: #2196F3;
+            margin: 5px;
+            padding: 8px 15px;
+        }
+        
+        .vote-button:hover, .action-button:hover {
+            background-color: #1976D2;
+        }
+        
+        .mic-status {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background-color: #666;
+            margin-left: 10px;
+        }
+        
+        .mic-status.speaking {
+            background-color: #4CAF50;
+        }
+        
+        .phase-indicator {
+            font-size: 18px;
+            font-weight: bold;
+            text-align: center;
+            padding: 10px;
+            background-color: #4a4a4a;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🐺 Werewolf Game</h1>
+        
+        <!-- Setup Panel -->
+        <div id="setupPanel" class="setup-panel">
+            <h2>Join Game</h2>
+            <div class="form-group">
+                <label for="playerName">Your Name:</label>
+                <input type="text" id="playerName" placeholder="Enter your name" value="Alice">
+            </div>
+            <div class="form-group">
+                <label for="playerRole">Your Role:</label>
+                <select id="playerRole">
+                    <option value="Villager">Villager</option>
+                    <option value="Seer">Seer</option>
+                    <option value="Doctor">Doctor</option>
+                    <option value="Werewolf">Werewolf</option>
+                </select>
+            </div>
+            <button id="joinRoomBtn">Join Room</button>
+            <button id="startGameBtn" disabled>Start Game</button>
+            <div id="setupStatus"></div>
+        </div>
+        
+        <!-- Game Panel -->
+        <div id="gamePanel" class="game-panel hidden">
+            <div class="phase-indicator" id="phaseIndicator">Waiting for game to start...</div>
+            
+            <div class="game-info">
+                <div class="panel">
+                    <h3>Game Info</h3>
+                    <p><strong>Your Role:</strong> <span id="yourRole">-</span></p>
+                    <p><strong>Round:</strong> <span id="currentRound">0</span></p>
+                    <p><strong>Phase:</strong> <span id="currentPhase">Setup</span></p>
+                    <div class="mic-status" id="micStatus"></div>
+                    <span>Mic Status</span>
+                </div>
+                
+                <div class="panel">
+                    <h3>Players</h3>
+                    <ul id="playersList" class="player-list"></ul>
+                </div>
+            </div>
+            
+            <div class="debate-area">
+                <h3>Debate</h3>
+                <div id="debateMessages"></div>
+            </div>
+            
+            <div class="action-area">
+                <h3>Actions</h3>
+                <div id="actionContent">
+                    <p>Waiting for actions...</p>
+                </div>
+            </div>
+            
+            <div id="announcements"></div>
+        </div>
+    </div>
+
+    <script>
+        // Game state
+        let room = null;
+        let gameState = {
+            playerName: '',
+            playerRole: '',
+            roomName: '',
+            currentRound: 0,
+            currentPhase: 'setup',
+            players: [],
+            pendingVote: null,
+            pendingTargetSelection: null
+        };
+        
+        // UI Elements
+        const setupPanel = document.getElementById('setupPanel');
+        const gamePanel = document.getElementById('gamePanel');
+        const joinRoomBtn = document.getElementById('joinRoomBtn');
+        const startGameBtn = document.getElementById('startGameBtn');
+        const setupStatus = document.getElementById('setupStatus');
+        const phaseIndicator = document.getElementById('phaseIndicator');
+        const yourRole = document.getElementById('yourRole');
+        const currentRound = document.getElementById('currentRound');
+        const currentPhase = document.getElementById('currentPhase');
+        const playersList = document.getElementById('playersList');
+        const debateMessages = document.getElementById('debateMessages');
+        const actionContent = document.getElementById('actionContent');
+        const announcements = document.getElementById('announcements');
+        const micStatus = document.getElementById('micStatus');
+        
+        // Event handlers
+        joinRoomBtn.addEventListener('click', joinRoom);
+        startGameBtn.addEventListener('click', startGame);
+        
+        async function joinRoom() {
+            const playerName = document.getElementById('playerName').value.trim();
+            if (!playerName) {
+                showError('Please enter your name');
+                return;
+            }
+            
+            gameState.playerName = playerName;
+            gameState.playerRole = document.getElementById('playerRole').value;
+            
+            try {
+                joinRoomBtn.disabled = true;
+                showStatus('Joining room...');
+                
+                // Get LiveKit token
+                const response = await fetch('/join-room', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ player_name: playerName })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Failed to join room: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                gameState.roomName = data.room_name;
+                
+                // Connect to LiveKit
+                await connectToLiveKit(data.url, data.token);
+                
+                showStatus(`Connected to room: ${data.room_name}`);
+                startGameBtn.disabled = false;
+                
+            } catch (error) {
+                showError(`Failed to join room: ${error.message}`);
+                joinRoomBtn.disabled = false;
+            }
+        }
+        
+        async function startGame() {
+            try {
+                startGameBtn.disabled = true;
+                showStatus('Starting game...');
+                
+                const response = await fetch('/start-game', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        room_name: gameState.roomName,
+                        player_name: gameState.playerName,
+                        player_role: gameState.playerRole
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Failed to start game: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                // Switch to game panel
+                setupPanel.classList.add('hidden');
+                gamePanel.classList.remove('hidden');
+                
+                // Update UI
+                yourRole.textContent = gameState.playerRole;
+                updatePlayersList(data.players);
+                showStatus('Game started!');
+                updatePhase('Game Starting...');
+                
+            } catch (error) {
+                showError(`Failed to start game: ${error.message}`);
+                startGameBtn.disabled = false;
+            }
+        }
+        
+        async function connectToLiveKit(url, token) {
+            const { Room } = await import('https://unpkg.com/livekit-client@2.5.7/dist/livekit-client.esm.mjs');
+            
+            room = new Room();
+            
+            // Handle data messages
+            room.on('dataReceived', (payload, participant, kind, topic) => {
+                try {
+                    const message = JSON.parse(new TextDecoder().decode(payload));
+                    handleDataMessage(message);
+                } catch (error) {
+                    console.error('Error parsing data message:', error);
+                }
+            });
+            
+            // Connect to room
+            await room.connect(url, token);
+            console.log('Connected to LiveKit room');
+        }
+        
+        function handleDataMessage(message) {
+            console.log('Received message:', message);
+            
+            switch (message.type) {
+                case 'request_vote':
+                    showVoteOptions(message.options, message.prompt);
+                    break;
+                    
+                case 'can_speak':
+                    showSpeakPrompt(message.prompt);
+                    break;
+                    
+                case 'debate_turn':
+                    showDebateTurn(message.prompt);
+                    break;
+                    
+                case 'request_target_selection':
+                    showTargetSelection(message.action, message.options, message.prompt);
+                    break;
+                    
+                case 'game_state_update':
+                    updateGameState(message);
+                    break;
+                    
+                case 'announcement':
+                    showAnnouncement(message.text);
+                    break;
+                    
+                default:
+                    console.log('Unknown message type:', message.type);
+            }
+        }
+        
+        function showVoteOptions(options, prompt) {
+            actionContent.innerHTML = `
+                <h4>${prompt}</h4>
+                <div>
+                    ${options.map(option => 
+                        `<button class="vote-button" onclick="vote('${option}')">${option}</button>`
+                    ).join('')}
+                </div>
+            `;
+        }
+        
+        function showSpeakPrompt(prompt) {
+            actionContent.innerHTML = `
+                <h4>${prompt}</h4>
+                <p>Start speaking if you want to participate in the debate!</p>
+                <div class="mic-status speaking" id="speakIndicator"></div>
+            `;
+            
+            // Visual feedback for speaking window
+            setTimeout(() => {
+                const indicator = document.getElementById('speakIndicator');
+                if (indicator) {
+                    indicator.classList.remove('speaking');
+                }
+            }, 5000);
+        }
+        
+        function showDebateTurn(prompt) {
+            actionContent.innerHTML = `
+                <h4>${prompt}</h4>
+                <p>Continue speaking. We'll capture your message when you're done.</p>
+                <div class="mic-status speaking"></div>
+            `;
+        }
+        
+        function showTargetSelection(action, options, prompt) {
+            actionContent.innerHTML = `
+                <h4>${prompt}</h4>
+                <p>Action: ${action}</p>
+                <div>
+                    ${options.map(option => 
+                        `<button class="action-button" onclick="selectTarget('${option}')">${option}</button>`
+                    ).join('')}
+                </div>
+            `;
+        }
+        
+        function updateGameState(message) {
+            if (message.update_type === 'day_phase_start') {
+                updatePhase('Day Phase - Debate');
+                currentRound.textContent = message.round || gameState.currentRound;
+                updatePlayersList(message.players || []);
+            } else if (message.update_type === 'debate_update') {
+                addDebateMessage(message.speaker, message.dialogue);
+            } else if (message.update_type === 'voting_phase') {
+                updatePhase('Day Phase - Voting');
+                showAnnouncement(message.message);
+            }
+            
+            if (message.game_state) {
+                currentRound.textContent = message.game_state.round || gameState.currentRound;
+                if (message.game_state.remaining_players) {
+                    updatePlayersList(message.game_state.remaining_players.split(', '));
+                }
+            }
+        }
+        
+        function showAnnouncement(text) {
+            const announcement = document.createElement('div');
+            announcement.className = 'status-message';
+            announcement.textContent = text;
+            announcements.appendChild(announcement);
+            
+            // Auto-remove after 10 seconds
+            setTimeout(() => {
+                if (announcement.parentNode) {
+                    announcement.parentNode.removeChild(announcement);
+                }
+            }, 10000);
+        }
+        
+        function addDebateMessage(speaker, dialogue) {
+            const message = document.createElement('div');
+            message.className = 'debate-message';
+            message.innerHTML = `<strong>${speaker}:</strong> ${dialogue}`;
+            debateMessages.appendChild(message);
+            debateMessages.scrollTop = debateMessages.scrollHeight;
+        }
+        
+        function updatePlayersList(players) {
+            gameState.players = players;
+            playersList.innerHTML = players.map(player => 
+                `<li>${player}${player === gameState.playerName ? ' (You)' : ''}</li>`
+            ).join('');
+        }
+        
+        function updatePhase(phase) {
+            gameState.currentPhase = phase;
+            currentPhase.textContent = phase;
+            phaseIndicator.textContent = phase;
+        }
+        
+        function vote(target) {
+            sendDataMessage({
+                type: 'vote',
+                target: target
+            });
+            
+            actionContent.innerHTML = `<p>You voted for: <strong>${target}</strong></p>`;
+        }
+        
+        function selectTarget(target) {
+            sendDataMessage({
+                type: 'target_selection',
+                target: target
+            });
+            
+            actionContent.innerHTML = `<p>You selected: <strong>${target}</strong></p>`;
+        }
+        
+        function sendDataMessage(message) {
+            if (room && room.localParticipant) {
+                const encoder = new TextEncoder();
+                const data = encoder.encode(JSON.stringify(message));
+                room.localParticipant.publishData(data);
+                console.log('Sent message:', message);
+            }
+        }
+        
+        function showStatus(message) {
+            setupStatus.innerHTML = `<div class="status-message">${message}</div>`;
+        }
+        
+        function showError(message) {
+            setupStatus.innerHTML = `<div class="error-message">${message}</div>`;
+        }
+    </script>
+</body>
+</html> 

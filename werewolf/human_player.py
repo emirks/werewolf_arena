@@ -4,16 +4,17 @@ from typing import Optional, List, Dict, Any, Tuple
 import threading
 import time
 import os
+import json
+import aiohttp
 
 from livekit import agents, rtc, api
 from livekit.agents.voice import room_io
-from livekit.plugins import openai
-from livekit.agents.stt import SpeechEventType, SpeechEvent
+from livekit.plugins import openai, silero
+from livekit.agents.stt import SpeechEventType, SpeechEvent, StreamAdapter
 from typing import AsyncIterable
 
-from werewolf.livekit_participant import LiveKitParticipant
 from werewolf.lm import LmLog
-from werewolf.model import GameView, group_and_format_observations
+from werewolf.model import GameView, group_and_format_observations, Player, SEER
 from werewolf.config import MAX_DEBATE_TURNS, NUM_PLAYERS
 
 logger = logging.getLogger(__name__)
@@ -24,73 +25,116 @@ class UserInputTimeout(Exception):
     pass
 
 
-class HumanPlayer(LiveKitParticipant):
-    """Human player that extends LiveKitParticipant with user interaction."""
+class HumanPlayer(Player):
+    """Human player that extends LiveKitParticipant with data channel communication."""
     
     def __init__(self, name: str, role: str, personality: Optional[str] = ""):
-        super().__init__(name)
-        self.role = role
-        self.personality = personality
-        self.observations: List[str] = []
-        self.bidding_rationale = ""
-        self.gamestate: Optional[GameView] = None
+        # Initialize parent Player class properly
+        super().__init__(name, role, "human", personality)
+        
+        # Add Seer-specific attribute if needed
+        if self.role == SEER:
+            self.previously_unmasked: Dict[str, str] = {}
+        
         self.participant_id = None
         
-        # For transcription and user input
-        self._current_input_future = None
-        self._user_speaking = False
-        self._last_transcription = ""
+        # Data channel message storage
+        self._current_vote: Optional[str] = None
+        self._current_target_selection: Optional[str] = None
+        self._pending_responses: Dict[str, asyncio.Event] = {}
+        self._response_data: Dict[str, Any] = {}
         
         # STT event handling
-        self._waited_event_type: Optional[SpeechEventType] = None
-        self._event_result: Optional[str] = None
-        self._event_ready = asyncio.Event()
+        self._user_speaking = False
+        self._last_transcription = ""
+        self._speech_detected_in_window = False
         self._stt_task: Optional[asyncio.Task] = None
         
+        # HTTP session for STT
+        self._http_session: Optional[aiohttp.ClientSession] = None
+        
+        # LiveKit connection state
+        self._connected = False
+        self.room: Optional[rtc.Room] = None
+        
+        self.livekit_url = os.getenv("LIVEKIT_URL")
         self.livekit_api_key = os.getenv("LIVEKIT_API_KEY")
         self.livekit_api_secret = os.getenv("LIVEKIT_API_SECRET")
         
-    def setup_livekit_for_user(self, room_name: str):
-        """Setup LiveKit for user input."""        
-        token = api.AccessToken(self.livekit_api_key, self.livekit_api_secret)
-        self.participant_id = f"user_{self.name}"
-        token.with_identity(self.participant_id).with_name(self.name)
-        token.with_grants(api.VideoGrants(
-            room_join=True,
-            room=room_name,
-            can_publish=True,
-            can_subscribe=True,
-            can_publish_data=True
-        ))
+    # def setup_livekit_for_user(self, room_name: str):
+    #     """Setup LiveKit for user input."""        
+    #     token = api.AccessToken(self.livekit_api_key, self.livekit_api_secret)
+    #     self.participant_id = f"user_{self.name}"
+    #     token.with_identity(self.participant_id).with_name(self.name)
+    #     token.with_grants(api.VideoGrants(
+    #         room_join=True,
+    #         room=room_name,
+    #         can_publish=True,
+    #         can_subscribe=True,
+    #         can_publish_data=True
+    #     ))
         
-        return token
+    #     return token
 
-    async def setup_livekit_agent_for_user(self, ctx: agents.JobContext):
+    async def setup_livekit_agent_for_user(self, room: rtc.Room, room_name: str):
         """Setup and connect to LiveKit room with TTS capabilities."""
         try:
-            # will only have stt
-            self.stt = openai.STT()
+            logger.info(f"Setting up LiveKit agent for {self.name}")
+            self.room = room
+            agent_token = api.AccessToken(self.livekit_api_key, self.livekit_api_secret)
+            agent_token.with_identity(f"agent_for_{self.name}").with_name(self.name)
+            agent_token.with_grants(api.VideoGrants(
+                room_join=True,
+                room=room_name,
+                can_publish=True,
+                can_subscribe=True,
+                can_publish_data=True
+            ))
+            agent_token_jwt = agent_token.to_jwt()
+            logger.info(f"Connecting to LiveKit room {room.name} with token {agent_token_jwt}")
+            await room.connect(self.livekit_url, agent_token_jwt)
+            logger.info(f"Connected to LiveKit room {room.name}")
+
+            # Create HTTP session for STT
+            self._http_session = aiohttp.ClientSession()
+            
+            # Setup STT with custom session and VAD for streaming
+            self.stt = openai.STT(session=self._http_session)
+            logger.info(f"Setting up STT for {self.name}")
+            
+            # Add VAD for streaming support
+            self.vad = silero.VAD.load()
+            
             self.agent_session = agents.AgentSession(
                 stt=self.stt,
             )
-            self.stt_stream = self.stt.stream()
+            logger.info(f"Setting up agent session for {self.name}")
             
-            self.room = ctx.room
+            # Wrap STT in StreamAdapter for streaming support
+            self.stt_stream = StreamAdapter(
+                stt=self.stt,
+                vad=self.vad
+            )
+            
             await self.agent_session.start(
-                room=ctx.room,
-                agent=agents.Agent(),
+                room=room,
+                agent=agents.Agent(
+                    instructions="You are the transcriptor of a user playing a game of werewolf."
+                ),
                 room_input_options=room_io.RoomInputOptions(
                     text_enabled=True,
                     audio_enabled=False,
                     video_enabled=False,
                     participant_identity=self.participant_id,
-                    # text_input_cb=self._on_user_input,
                 ),
             )
+            logger.info(f"Agent session started for {self.name}")
+            # Setup data channel event listener
+            self.room.on("data_received", self._on_data_received)
             
             # Start background STT processing task
             self._stt_task = asyncio.create_task(self.process_stt_stream(self.stt_stream))
-            
+            logger.info(f"STT task started for {self.name}")
             self._connected = True
             logger.info(f"LiveKit agent session setup complete for {self.name}")
             
@@ -98,11 +142,62 @@ class HumanPlayer(LiveKitParticipant):
             logger.error(f"Failed to setup LiveKit agent session for {self.name}: {e}")
             raise
 
-    # def _on_user_input(self, sess: agents.AgentSession, ev: room_io.TextInputEvent):
-    #     """Handle user input."""
-    #     logger.info(f"User input: {ev.text}")
-    #     self.room.local_participant.publish_data(ev.text)
-    
+    def _on_data_received(self, data: rtc.DataPacket):
+        """Handle incoming data channel messages."""
+        try:
+            message = json.loads(data.data.decode('utf-8'))
+            message_type = message.get('type')
+            
+            logger.info(f"Received data message: {message}")
+            
+            if message_type == 'vote':
+                self._current_vote = message.get('target')
+                logger.info(f"Vote received: {self._current_vote}")
+                
+            elif message_type == 'target_selection':
+                self._current_target_selection = message.get('target')
+                logger.info(f"Target selection received: {self._current_target_selection}")
+                
+                # Signal any waiting target selection
+                if 'target_selection' in self._pending_responses:
+                    self._response_data['target_selection'] = self._current_target_selection
+                    self._pending_responses['target_selection'].set()
+                    
+        except (json.JSONDecodeError, Exception) as e:
+            logger.error(f"Error processing data message: {e}")
+
+    async def send_data_message(self, message_type: str, data: Dict[str, Any] = None):
+        """Send a message through the data channel."""
+        if not self._connected or not self.room:
+            logger.warning("Not connected to LiveKit room, cannot send data message")
+            return
+            
+        message = {"type": message_type, "player": self.name}
+        if data:
+            message.update(data)
+            
+        try:
+            await self.room.local_participant.publish_data(json.dumps(message).encode('utf-8'))
+            logger.info(f"Sent data message: {message}")
+        except Exception as e:
+            logger.error(f"Error sending data message: {e}")
+
+    def reset_vote(self):
+        """Reset the current vote (called at daytime start)."""
+        self._current_vote = None
+        logger.info(f"Vote reset for {self.name}")
+
+    async def disconnect(self):
+        """Disconnect from LiveKit room."""
+        if self.room:
+            await self.room.disconnect()
+            self._connected = False
+            logger.info(f"{self.name} disconnected from LiveKit")
+
+    def is_connected(self) -> bool:
+        """Check if connected to LiveKit room."""
+        return self._connected
+
     async def cleanup(self):
         """Clean up resources including background STT task."""
         # Cancel the background STT task
@@ -112,6 +207,10 @@ class HumanPlayer(LiveKitParticipant):
                 await self._stt_task
             except asyncio.CancelledError:
                 pass
+        
+        # Close HTTP session
+        if self._http_session and not self._http_session.closed:
+            await self._http_session.close()
         
         # Close agent session
         if hasattr(self, 'agent_session') and self.agent_session:
@@ -169,8 +268,8 @@ class HumanPlayer(LiveKitParticipant):
             "num_villagers": NUM_PLAYERS - 4,
         }
 
-    async def process_stt_stream(self, stream: AsyncIterable[SpeechEvent]):
-        """Background task to process STT events and signal when waited events occur."""
+    async def process_stt_stream(self, stream):
+        """Background task to process STT events."""
         try:
             async for event in stream:
                 if event.type == SpeechEventType.FINAL_TRANSCRIPT:
@@ -181,193 +280,135 @@ class HumanPlayer(LiveKitParticipant):
                 elif event.type == SpeechEventType.START_OF_SPEECH:
                     logger.info("Start of speech")
                     self._user_speaking = True
+                    self._speech_detected_in_window = True
                 elif event.type == SpeechEventType.END_OF_SPEECH:
                     logger.info("End of speech")
                     self._user_speaking = False
-                
-                # Check if this is the event type someone is waiting for
-                if self._waited_event_type is not None and event.type == self._waited_event_type:
-                    # Store the result based on event type
-                    if event.type in [SpeechEventType.FINAL_TRANSCRIPT, SpeechEventType.INTERIM_TRANSCRIPT]:
-                        self._event_result = event.alternatives[0].text if event.alternatives else ""
-                    else:
-                        self._event_result = str(event.type.value)
-                    
-                    # Signal that the waited event has occurred
-                    self._event_ready.set()
-                    logger.info(f"Waited event {self._waited_event_type} occurred with result: {self._event_result}")
                     
         except Exception as e:
             logger.error(f"Error in STT stream processing: {e}")
         finally:
-            await stream.aclose()
-            
-    async def wait_for_stt_event(self, event_type: SpeechEventType, timeout: float = 30.0) -> Optional[str]:
-        """Wait for a specific STT event type."""
-        # Reset the event and set what we're waiting for
-        self._event_ready.clear()
-        self._waited_event_type = event_type
-        self._event_result = None
-        
-        try:
-            # Wait for the event to occur with timeout
-            await asyncio.wait_for(self._event_ready.wait(), timeout=timeout)
-            result = self._event_result
-            
-            # Clear the waited event
-            self._waited_event_type = None
-            self._event_result = None
-            
-            return result
-            
-        except asyncio.TimeoutError:
-            logger.warning(f"Timeout waiting for STT event {event_type}")
-            # Clear the waited event
-            self._waited_event_type = None
-            self._event_result = None
-            return None
+            if hasattr(stream, 'aclose'):
+                await stream.aclose()
 
-    async def _wait_for_user_input(self, prompt: str, options: Optional[List[str]] = None, 
-                                   timeout: float = 30.0) -> str:
-        """Wait for user input with optional timeout."""
-        logger.info(f"Waiting for user input: {prompt}")
-        if options:
-            logger.info(f"Available options: {', '.join(options)}")
-        
-        # In a real implementation, this would listen for data messages from the UI
-        # For now, we'll simulate with a basic input mechanism
-        # This should be replaced with actual LiveKit data channel communication
-        self.room.local_participant.publish_data(prompt)
-        
-        def get_input():
-            return input(f"{self.name} - {prompt}: ")
+    async def wait_for_response(self, response_type: str, timeout: float = 30.0) -> Optional[str]:
+        """Wait for a response from the UI."""
+        event = asyncio.Event()
+        self._pending_responses[response_type] = event
         
         try:
-            # Use asyncio to run the input in a thread with timeout
-            loop = asyncio.get_event_loop()
-            result = await asyncio.wait_for(
-                loop.run_in_executor(None, get_input),
-                timeout=timeout
-            )
-            
-            # Validate input against options if provided
-            if options and result not in options:
-                logger.warning(f"Invalid input '{result}', expected one of: {options}")
-                return await self._wait_for_user_input(prompt, options, timeout)
-            
-            return result
-            
+            await asyncio.wait_for(event.wait(), timeout=timeout)
+            return self._response_data.get(response_type)
         except asyncio.TimeoutError:
-            logger.warning(f"User input timeout for {self.name}")
-            # Return a default option if available
-            if options:
-                return options[0]
-            raise UserInputTimeout(f"No user input received within {timeout} seconds")
+            logger.warning(f"Timeout waiting for {response_type} response")
+            return None
+        finally:
+            self._pending_responses.pop(response_type, None)
+            self._response_data.pop(response_type, None)
 
     async def vote(self) -> Tuple[Optional[str], LmLog]:
-        """Ask user to vote for a player."""
+        """Check for existing vote or ask user to vote."""
         if not self.gamestate:
             raise ValueError("GameView not initialized. Call initialize_game_view() first.")
         
         options = [player for player in self.gamestate.current_players if player != self.name]
         
-        try:
-            game_state = self._get_game_state()
-            prompt = f"Round {game_state['round']} - Vote to eliminate a player"
+        # Check if vote already exists
+        if self._current_vote and self._current_vote in options:
+            vote = self._current_vote
+            logger.info(f"Using existing vote: {vote}")
+        else:
+            # Ask for vote
+            await self.send_data_message("request_vote", {
+                "options": options,
+                "prompt": f"Round {self.gamestate.round_number} - Vote to eliminate a player"
+            })
             
-            vote = await self._wait_for_user_input(prompt, options, timeout=60.0)
+            # Wait for vote response
+            vote = await self.wait_for_response("vote", timeout=60.0)
             
-            if len(self.gamestate.debate) == MAX_DEBATE_TURNS:
-                self._add_observation(f"After the debate, I voted to remove {vote} from the game.")
-            
-            log = LmLog(
-                prompt=f"USER_VOTE: {prompt}",
-                raw_resp=vote,
-                result={"vote": vote}
-            )
-            
-            return vote, log
-            
-        except UserInputTimeout:
-            # Default to first available option
-            default_vote = options[0] if options else None
-            log = LmLog(
-                prompt="USER_VOTE_TIMEOUT",
-                raw_resp="timeout",
-                result={"vote": default_vote}
-            )
-            return default_vote, log
+            if not vote or vote not in options:
+                vote = options[0] if options else None
+                logger.warning(f"No valid vote received, defaulting to: {vote}")
+        
+        if len(self.gamestate.debate) == MAX_DEBATE_TURNS:
+            self._add_observation(f"After the debate, I voted to remove {vote} from the game.")
+        
+        log = LmLog(
+            prompt=f"USER_VOTE: Vote to eliminate",
+            raw_resp=str(vote),
+            result={"vote": vote}
+        )
+        
+        return vote, log
 
     async def bid(self) -> Tuple[Optional[int], LmLog]:
-        """Ask user if they want to speak (bid)."""
+        """Check for user speech within 5 seconds to determine bid."""
         try:
-            prompt = "Do you want to speak? (0=No, 1-4=Yes, higher=more eager)"
-            bid_str = await self._wait_for_user_input(prompt, ["0", "1", "2", "3", "4"], timeout=15.0)
-            bid = int(bid_str)
+            # Reset speech detection flag
+            self._speech_detected_in_window = False
             
-            self.bidding_rationale = f"User chose bid level {bid}"
+            # Send message that user can speak
+            await self.send_data_message("can_speak", {
+                "prompt": "You can speak now if you want to join the debate (you have 5 seconds)"
+            })
+            
+            # Wait 5 seconds and check for speech
+            await asyncio.sleep(5.0)
+            
+            if self._speech_detected_in_window:
+                bid = 4  # Highest bid if speech detected
+                self.bidding_rationale = "User started speaking, indicating desire to participate"
+            else:
+                bid = 0  # No speech detected
+                self.bidding_rationale = "No speech detected, user doesn't want to speak"
             
             log = LmLog(
-                prompt=f"USER_BID: {prompt}",
-                raw_resp=bid_str,
+                prompt=f"USER_BID: Speech detection window",
+                raw_resp=str(bid),
                 result={"bid": bid, "reasoning": self.bidding_rationale}
             )
             
             return bid, log
             
-        except (UserInputTimeout, ValueError):
-            # Default to not speaking
+        except Exception as e:
+            logger.error(f"Error in bid detection: {e}")
             log = LmLog(
-                prompt="USER_BID_TIMEOUT",
+                prompt="USER_BID_ERROR",
                 raw_resp="0",
-                result={"bid": 0, "reasoning": "Timeout or invalid input"}
+                result={"bid": 0, "reasoning": "Error in speech detection"}
             )
             return 0, log
 
     async def debate(self) -> Tuple[Optional[str], LmLog]:
-        """Ask user to speak and wait for speech end event."""
+        """Wait for user to stop speaking and get transcription."""
         try:
-            prompt = "It's your turn to speak. Start speaking when ready, stop when done."
+            await self.send_data_message("debate_turn", {
+                "prompt": "It's your turn to speak. Continue speaking and we'll get your message when you're done."
+            })
             
-            if self._connected and self._stt_task:
-                # Send prompt to UI
-                self.room.local_participant.publish_data(prompt)
-                logger.info(f"Waiting for user to speak...")
-                
-                # Wait for start of speech
-                await self.wait_for_stt_event(SpeechEventType.START_OF_SPEECH, timeout=60.0)
-                logger.info("User started speaking")
-                
-                # Wait for end of speech
-                await self.wait_for_stt_event(SpeechEventType.END_OF_SPEECH, timeout=120.0)
-                logger.info("User finished speaking")
-                
-                # Get the final transcription (it should be in _last_transcription)
-                speech = self._last_transcription
-                
-                if speech:
-                    # Use the speak function to broadcast the speech
-                    spoken_text, speak_log = await self.speak(speech)
-                
-            else:
-                # Fallback to text input if not connected to LiveKit
-                speech = await self._wait_for_user_input(prompt, timeout=120.0)
-                
-                # Use the speak function to broadcast the speech
-                spoken_text, speak_log = await self.speak(speech)
+            # Wait for user to stop speaking (since they should already be speaking after bid)
+            while self._user_speaking:
+                await asyncio.sleep(0.1)
+            
+            # Wait a bit more to ensure we get the final transcription
+            await asyncio.sleep(1.0)
+            
+            speech = self._last_transcription or ""
+            self._add_observation(f"I said: {speech}")
             
             log = LmLog(
-                prompt=f"USER_DEBATE: {prompt}",
+                prompt=f"USER_DEBATE: Transcription capture",
                 raw_resp=speech,
                 result={"say": speech}
             )
             
             return speech, log
             
-        except UserInputTimeout:
-            # Return empty speech
+        except Exception as e:
+            logger.error(f"Error in debate: {e}")
             log = LmLog(
-                prompt="USER_DEBATE_TIMEOUT",
+                prompt="USER_DEBATE_ERROR",
                 raw_resp="",
                 result={"say": ""}
             )
@@ -393,58 +434,55 @@ class HumanPlayer(LiveKitParticipant):
             if player != self.name and player != self.gamestate.other_wolf
         ]
         
-        try:
-            prompt = "Choose a player to eliminate tonight"
-            target = await self._wait_for_user_input(prompt, options, timeout=60.0)
-            
-            log = LmLog(
-                prompt=f"USER_ELIMINATE: {prompt}",
-                raw_resp=target,
-                result={"eliminate": target}
-            )
-            
-            return target, log
-            
-        except UserInputTimeout:
-            default_target = options[0] if options else None
-            log = LmLog(
-                prompt="USER_ELIMINATE_TIMEOUT",
-                raw_resp="timeout",
-                result={"eliminate": default_target}
-            )
-            return default_target, log
+        await self.send_data_message("request_target_selection", {
+            "action": "eliminate",
+            "options": options,
+            "prompt": "Choose a player to eliminate tonight"
+        })
+        
+        target = await self.wait_for_response("target_selection", timeout=60.0)
+        
+        if not target or target not in options:
+            target = options[0] if options else None
+            logger.warning(f"No valid elimination target received, defaulting to: {target}")
+        
+        log = LmLog(
+            prompt=f"USER_ELIMINATE: Choose elimination target",
+            raw_resp=str(target),
+            result={"eliminate": target}
+        )
+        
+        return target, log
 
     async def unmask(self) -> Tuple[Optional[str], LmLog]:
         """Seer chooses a player to investigate."""
         if not self.gamestate:
             raise ValueError("GameView not initialized. Call initialize_game_view() first.")
         
-        # Need to track previously unmasked players (simplified for now)
         options = [
             player for player in self.gamestate.current_players 
             if player != self.name
         ]
         
-        try:
-            prompt = "Choose a player to investigate tonight"
-            target = await self._wait_for_user_input(prompt, options, timeout=60.0)
-            
-            log = LmLog(
-                prompt=f"USER_INVESTIGATE: {prompt}",
-                raw_resp=target,
-                result={"investigate": target}
-            )
-            
-            return target, log
-            
-        except UserInputTimeout:
-            default_target = options[0] if options else None
-            log = LmLog(
-                prompt="USER_INVESTIGATE_TIMEOUT",
-                raw_resp="timeout",
-                result={"investigate": default_target}
-            )
-            return default_target, log
+        await self.send_data_message("request_target_selection", {
+            "action": "investigate",
+            "options": options,
+            "prompt": "Choose a player to investigate tonight"
+        })
+        
+        target = await self.wait_for_response("target_selection", timeout=60.0)
+        
+        if not target or target not in options:
+            target = options[0] if options else None
+            logger.warning(f"No valid investigation target received, defaulting to: {target}")
+        
+        log = LmLog(
+            prompt=f"USER_INVESTIGATE: Choose investigation target",
+            raw_resp=str(target),
+            result={"investigate": target}
+        )
+        
+        return target, log
 
     async def save(self) -> Tuple[Optional[str], LmLog]:
         """Doctor chooses a player to protect."""
@@ -453,28 +491,57 @@ class HumanPlayer(LiveKitParticipant):
         
         options = list(self.gamestate.current_players)
         
-        try:
-            prompt = "Choose a player to protect tonight"
-            target = await self._wait_for_user_input(prompt, options, timeout=60.0)
-            
+        await self.send_data_message("request_target_selection", {
+            "action": "protect",
+            "options": options,
+            "prompt": "Choose a player to protect tonight"
+        })
+        
+        target = await self.wait_for_response("target_selection", timeout=60.0)
+        
+        if not target or target not in options:
+            target = options[0] if options else None
+            logger.warning(f"No valid protection target received, defaulting to: {target}")
+        
+        if target:
             self._add_observation(f"During the night, I chose to protect {target}")
-            
-            log = LmLog(
-                prompt=f"USER_PROTECT: {prompt}",
-                raw_resp=target,
-                result={"protect": target}
+        
+        log = LmLog(
+            prompt=f"USER_PROTECT: Choose protection target",
+            raw_resp=str(target),
+            result={"protect": target}
+        )
+        
+        return target, log
+    
+    async def send_game_state_update(self, update_type: str, data: Dict[str, Any] = None):
+        """Send game state update through LiveKit data channel."""
+        game_state = self._get_game_state()
+        
+        update_data = {
+            "update_type": update_type,
+            "game_state": game_state
+        }
+        
+        if data:
+            update_data.update(data)
+        
+        await self.send_data_message("game_state_update", update_data)
+    
+    async def broadcast_announcement(self, announcement: str):
+        """Broadcast game announcement through LiveKit data channel."""
+        await self.send_data_message("announcement", {
+            "text": announcement,
+            "timestamp": time.time()
+        })
+        
+        # Also add to observations as normal
+        self.add_announcement(announcement)
+        
+    def reveal_and_update(self, player, role):
+        """Called by the GameMaster when the Human is the Seer to update their state."""
+        if self.role == SEER:
+            self._add_observation(
+                f"During the night, I decided to investigate {player} and learned they are a {role}."
             )
-            
-            return target, log
-            
-        except UserInputTimeout:
-            default_target = options[0] if options else None
-            if default_target:
-                self._add_observation(f"During the night, I chose to protect {default_target}")
-            
-            log = LmLog(
-                prompt="USER_PROTECT_TIMEOUT",
-                raw_resp="timeout",
-                result={"protect": default_target}
-            )
-            return default_target, log 
+            self.previously_unmasked[player] = role 

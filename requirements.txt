@@ -7,3 +7,12 @@ google-cloud-aiplatform
 anthropic
 marko
 pandas
+fastapi
+uvicorn[standard]
+pydantic
+livekit
+livekit-agents
+livekit-plugins-openai
+livekit-plugins-silero
+google-generativeai
+aiohttp

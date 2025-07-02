@@ -15,12 +15,14 @@
 import enum
 import json
 import random
+import asyncio
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from werewolf.lm import LmLog, generate
 from werewolf.prompts import ACTION_PROMPTS_AND_SCHEMAS
 from werewolf.utils import Deserializable
 from werewolf.config import MAX_DEBATE_TURNS, NUM_PLAYERS
+from werewolf.livekit_participant import LiveKitParticipant
 
 # Role names
 VILLAGER = "Villager"
@@ -109,7 +111,7 @@ class GameView:
         return cls(**data)
 
 
-class Player(Deserializable):
+class Player(LiveKitParticipant):
     """Represents a player in the game."""
 
     def __init__(
@@ -119,7 +121,7 @@ class Player(Deserializable):
         model: Optional[str] = None,
         personality: Optional[str] = "",
     ):
-        self.name = name
+        LiveKitParticipant.__init__(self, name)
         self.role = role
         self.personality = personality
         self.model = model
@@ -202,7 +204,7 @@ class Player(Deserializable):
         # Set temperature based on allowed_values
         temperature = 0.5 if allowed_values else 1.0
 
-        return generate(
+        result, log = generate(
             prompt_template,
             response_schema,
             game_state,
@@ -211,6 +213,7 @@ class Player(Deserializable):
             allowed_values=allowed_values,
             result_key=result_key,
         )
+        return result, log
 
     def vote(self) -> tuple[str | None, LmLog]:
         """Vote for a player."""
@@ -237,11 +240,14 @@ class Player(Deserializable):
             self.bidding_rationale = log.result.get("reasoning", "")
         return bid, log
 
-    def debate(self) -> tuple[str | None, LmLog]:
+    async def debate(self) -> tuple[str | None, LmLog]:
         """Engage in the debate."""
         result, log = self._generate_action("debate", [])
         if result is not None:
             say = result.get("say", None)
+            if say:
+                # Use the speak function to broadcast the AI's speech
+                spoken_text, speak_log = await self.speak(say)
             return say, log
         return result, log
 
@@ -255,6 +261,16 @@ class Player(Deserializable):
                 self._add_observation(f"Summary: {summary}")
             return summary, log
         return result, log
+
+    async def send_game_state_update(self, update_type: str, data: Dict[str, Any] = None):
+        """Send game state update through LiveKit data channel (for human players)."""
+        # This method will be overridden by HumanPlayer to actually send data
+        pass
+
+    async def broadcast_announcement(self, announcement: str):
+        """Broadcast game announcement (for human players)."""
+        # This method will be overridden by HumanPlayer to actually send data
+        pass
 
     def to_dict(self) -> Any:
         return to_dict(self)
