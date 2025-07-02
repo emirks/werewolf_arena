@@ -5,6 +5,8 @@ import threading
 import time
 import os
 import json
+import aiohttp
+import contextvars
 
 from livekit import agents, rtc, api
 from livekit.agents.voice import room_io
@@ -23,6 +25,19 @@ class UserInputTimeout(Exception):
     """Exception raised when user input times out."""
     pass
 
+g_session = None
+def new_session() -> aiohttp.ClientSession:
+    global g_session
+    if g_session is None:
+        logger.debug("http_session(): creating a new httpclient ctx")
+
+        http_proxy = None
+        connector = aiohttp.TCPConnector(
+            limit_per_host=50,
+            keepalive_timeout=120,  # the default is only 15s
+        )
+        g_session = aiohttp.ClientSession(proxy=http_proxy, connector=connector)
+    return g_session
 
 class HumanPlayer(Player):
     """Human player that extends Player with data channel communication and overrides LiveKit methods."""
@@ -98,6 +113,7 @@ class HumanPlayer(Player):
                 language="en",
                 model="gpt-4o-mini-transcribe"
             )
+            self.stt._session = new_session()
             logger.info(f"Setting up STT for {self.name}")
             
             self.agent_session = agents.AgentSession(

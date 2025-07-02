@@ -144,7 +144,7 @@ async def start_game(request: StartGameRequest):
         all_ai_players = [seer, doctor] + werewolves + villagers
         ai_players = [p for p in all_ai_players if not isinstance(p, HumanPlayer)]
         for player in ai_players:
-            await player.setup_livekit_session(room)
+            await player.setup_livekit_session(room, request.room_name)
         
         # Initialize game view for all players
         current_player_names = [p.name for p in all_ai_players]

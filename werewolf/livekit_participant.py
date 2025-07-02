@@ -2,9 +2,11 @@ import asyncio
 import logging
 from typing import Optional, Any, Dict
 from abc import ABC, abstractmethod
+import os
+import uuid
 
 import livekit
-from livekit import rtc, agents
+from livekit import rtc, agents, api
 from livekit.agents import tts
 from livekit.plugins import openai
 
@@ -23,11 +25,17 @@ class LiveKitParticipant(Deserializable):
         self.session: agents.AgentSession = None
         self._connected = False
         
-    async def setup_livekit_session(self, room: rtc.Room):
+        self.livekit_url = os.getenv("LIVEKIT_URL")
+        self.livekit_api_key = os.getenv("LIVEKIT_API_KEY")
+        self.livekit_api_secret = os.getenv("LIVEKIT_API_SECRET")
+        
+    async def setup_livekit_session(self, room: rtc.Room, room_name: str):
         """Setup and connect to LiveKit room with TTS capabilities."""
         try:
             self.session = agents.AgentSession(
-                tts=openai.TTS()
+                tts=openai.TTS(
+                    model="gpt-4o-mini-tts"
+                )
             )
             
             self.room = room

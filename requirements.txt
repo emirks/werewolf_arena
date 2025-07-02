@@ -3,7 +3,7 @@ tqdm
 absl-py
 openai
 pyyaml
-google-cloud-aiplatform
+google-genai
 anthropic
 marko
 pandas
@@ -13,6 +13,4 @@ pydantic
 livekit
 livekit-agents
 livekit-plugins-openai
-livekit-plugins-silero
-google-generativeai
 aiohttp
