@@ -5,12 +5,11 @@ import threading
 import time
 import os
 import json
-import aiohttp
 
 from livekit import agents, rtc, api
 from livekit.agents.voice import room_io
-from livekit.plugins import openai, silero
-from livekit.agents.stt import SpeechEventType, SpeechEvent, StreamAdapter
+from livekit.plugins import openai
+from livekit.agents.stt import SpeechEventType, SpeechEvent
 from typing import AsyncIterable
 
 from werewolf.lm import LmLog
@@ -26,10 +25,10 @@ class UserInputTimeout(Exception):
 
 
 class HumanPlayer(Player):
-    """Human player that extends LiveKitParticipant with data channel communication."""
+    """Human player that extends Player with data channel communication and overrides LiveKit methods."""
     
     def __init__(self, name: str, role: str, personality: Optional[str] = ""):
-        # Initialize parent Player class properly
+        # Initialize parent Player class properly - this calls LiveKitParticipant.__init__ 
         super().__init__(name, role, "human", personality)
         
         # Add Seer-specific attribute if needed
@@ -50,12 +49,10 @@ class HumanPlayer(Player):
         self._speech_detected_in_window = False
         self._stt_task: Optional[asyncio.Task] = None
         
-        # HTTP session for STT
-        self._http_session: Optional[aiohttp.ClientSession] = None
-        
-        # LiveKit connection state
+        # Override LiveKit connection state for human players
         self._connected = False
         self.room: Optional[rtc.Room] = None
+        self.session = None  # Override the LiveKitParticipant session
         
         self.livekit_url = os.getenv("LIVEKIT_URL")
         self.livekit_api_key = os.getenv("LIVEKIT_API_KEY")
@@ -95,26 +92,21 @@ class HumanPlayer(Player):
             await room.connect(self.livekit_url, agent_token_jwt)
             logger.info(f"Connected to LiveKit room {room.name}")
 
-            # Create HTTP session for STT
-            self._http_session = aiohttp.ClientSession()
-            
-            # Setup STT with custom session and VAD for streaming
-            self.stt = openai.STT(session=self._http_session)
+            # Setup STT with realtime streaming enabled
+            self.stt = openai.STT(
+                use_realtime=True,
+                language="en",
+                model="gpt-4o-mini-transcribe"
+            )
             logger.info(f"Setting up STT for {self.name}")
-            
-            # Add VAD for streaming support
-            self.vad = silero.VAD.load()
             
             self.agent_session = agents.AgentSession(
                 stt=self.stt,
             )
             logger.info(f"Setting up agent session for {self.name}")
             
-            # Wrap STT in StreamAdapter for streaming support
-            self.stt_stream = StreamAdapter(
-                stt=self.stt,
-                vad=self.vad
-            )
+            # Create STT stream for realtime transcription
+            self.stt_stream = self.stt.stream()
             
             await self.agent_session.start(
                 room=room,
@@ -207,10 +199,6 @@ class HumanPlayer(Player):
                 await self._stt_task
             except asyncio.CancelledError:
                 pass
-        
-        # Close HTTP session
-        if self._http_session and not self._http_session.closed:
-            await self._http_session.close()
         
         # Close agent session
         if hasattr(self, 'agent_session') and self.agent_session:
