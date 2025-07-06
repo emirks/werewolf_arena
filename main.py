@@ -22,10 +22,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import logging
 
-from livekit import api, rtc
+from livekit import api
 from werewolf import game
-from werewolf.model import Seer, Doctor, Villager, Werewolf, State
-from werewolf.human_player import HumanPlayer
+from werewolf.model import State, SEER, DOCTOR, WEREWOLF, VILLAGER, Seer, Doctor, Werewolf, Villager
+from werewolf.pipecat_human_player import PipecatHumanPlayer
+from werewolf.pipecat_ai_player import PipecatAIPlayer
 from werewolf.config import get_player_names
 
 # Configure logging
@@ -73,9 +74,8 @@ async def join_room(request: JoinRoomRequest):
         
         # Create LiveKit token
         token = api.AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
-        participant_id = f"user_{request.player_name}"
         
-        token.with_identity(participant_id).with_name(request.player_name)
+        token.with_identity(request.player_name).with_name(request.player_name)
         token.with_grants(api.VideoGrants(
             room_join=True,
             room=room_name,
@@ -90,7 +90,7 @@ async def join_room(request: JoinRoomRequest):
             "token": jwt_token,
             "url": LIVEKIT_URL,
             "room_name": room_name,
-            "participant_id": participant_id
+            "participant_id": request.player_name
         }
         
     except Exception as e:
@@ -122,37 +122,38 @@ async def start_game(request: StartGameRequest):
         ]
         villagers = [Villager(name=name, model=request.villager_model) for name in player_names[:3]]
         
-        # Create human player
-        human_player = HumanPlayer(
+        # Create human player using PipecatHumanPlayer
+        human_player = PipecatHumanPlayer(
             name=request.player_name,
             role=request.player_role
         )
-        room = rtc.Room()
-        await human_player.setup_livekit_agent_for_user(room, request.room_name)
+        await human_player.setup_pipecat_pipeline(request.room_name)
         
         # Replace one AI player with human based on role
-        if request.player_role == "Seer":
+        if request.player_role == SEER:
             seer = human_player
-        elif request.player_role == "Doctor":
+        elif request.player_role == DOCTOR:
             doctor = human_player
-        elif request.player_role == "Werewolf":
+        elif request.player_role == WEREWOLF:
             werewolves[0] = human_player
         else:  # Villager
             villagers[0] = human_player
+            human_player.role = VILLAGER
+        logger.info(f"Human player: {human_player.name}, role: {human_player.role}")
         
         # Create game state
-        all_ai_players = [seer, doctor] + werewolves + villagers
-        ai_players = [p for p in all_ai_players if not isinstance(p, HumanPlayer)]
+        all_players = [seer, doctor] + werewolves + villagers
+        ai_players = [p for p in all_players if isinstance(p, PipecatAIPlayer)]
         for player in ai_players:
-            await player.setup_livekit_session(room, request.room_name)
+            await player.setup_pipecat_pipeline(request.room_name)
         
         # Initialize game view for all players
-        current_player_names = [p.name for p in all_ai_players]
-        live_werewolves = [p for p in all_ai_players if p.role == "Werewolf"]
+        current_player_names = [p.name for p in all_players]
+        live_werewolves = [p for p in all_players if p.role == WEREWOLF]
         
-        for player in all_ai_players:
+        for player in all_players:
             other_wolf = None
-            if player.role == "Werewolf":
+            if player.role == WEREWOLF:
                 other_wolf_player = next(
                     (w for w in live_werewolves if w.name != player.name), None
                 )
@@ -167,8 +168,8 @@ async def start_game(request: StartGameRequest):
         
         # Create game state
         state = State(
-            villagers=[p for p in all_ai_players if p.role == "Villager"],
-            werewolves=[p for p in all_ai_players if p.role == "Werewolf"],
+            villagers=[p for p in all_players if p.role == VILLAGER],
+            werewolves=[p for p in all_players if p.role == WEREWOLF],
             seer=seer,
             doctor=doctor,
             session_id=request.room_name,
@@ -189,7 +190,7 @@ async def start_game(request: StartGameRequest):
         return {
             "message": "Game started successfully",
             "room_name": request.room_name,
-            "players": [p.name for p in all_ai_players],
+            "players": [p.name for p in all_players],
             "human_player": request.player_name,
             "human_role": request.player_role
         }

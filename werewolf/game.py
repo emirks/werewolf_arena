@@ -15,7 +15,7 @@
 """Werewolf game."""
 
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
+
 import random
 import asyncio
 import os
@@ -24,6 +24,7 @@ from typing import List
 import tqdm
 from livekit import api
 
+from werewolf.pipecat_human_player import PipecatHumanPlayer
 from werewolf.model import Round, RoundLog, State, VoteLog
 from werewolf.human_player import HumanPlayer
 from werewolf.config import MAX_DEBATE_TURNS, RUN_SYNTHETIC_VOTES
@@ -57,8 +58,10 @@ class GameMaster:
         
         # Find human player
         for p in self.state.players.values():
-            if isinstance(p, HumanPlayer):
+            tqdm.tqdm.write(f"Player: {p.name}, Type: {type(p)}")
+            if isinstance(p, PipecatHumanPlayer):
                 self.human_player = p
+                tqdm.tqdm.write(f"Human player found: {self.human_player.name}")
                 break
                 
         # Setup LiveKit API for room management
@@ -105,13 +108,13 @@ class GameMaster:
     def this_round_log(self) -> RoundLog:
         return self.logs[self.current_round_num]
 
-    def eliminate(self):
+    async def eliminate(self):
         """Werewolves choose a player to eliminate."""
         werewolves_alive = [
             w for w in self.state.werewolves if w.name in self.this_round.players
         ]
         wolf = random.choice(werewolves_alive)
-        eliminated, log = wolf.eliminate()
+        eliminated, log = await wolf.eliminate()
         self.this_round_log.eliminate = log
         if eliminated is not None:
             self.this_round.eliminated = eliminated
@@ -125,12 +128,12 @@ class GameMaster:
         else:
             raise ValueError("Eliminate did not return a valid player.")
 
-    def protect(self):
+    async def protect(self):
         """Doctor chooses a player to protect."""
         if self.state.doctor.name not in self.this_round.players:
             return  # Doctor no longer in the game
 
-        protect, log = self.state.doctor.save()
+        protect, log = await self.state.doctor.save()
         self.this_round_log.protect = log
 
         if protect is not None:
@@ -139,12 +142,13 @@ class GameMaster:
         else:
             raise ValueError("Protect did not return a valid player.")
 
-    def unmask(self):
+    async def unmask(self):
         """Seer chooses a player to unmask."""
         if self.state.seer.name not in self.this_round.players:
             return  # Seer no longer in the game
 
-        unmask, log = self.state.seer.unmask()
+        unmask, log = await self.state.seer.unmask()
+        tqdm.tqdm.write(f"{self.state.seer.name} unmasked {unmask}")
         self.this_round_log.investigate = log
 
         if unmask is not None:
@@ -153,10 +157,10 @@ class GameMaster:
         else:
             raise ValueError("Unmask function did not return a valid player.")
 
-    def _get_bid(self, player_name):
+    async def _get_bid(self, player_name):
         """Gets the bid for a specific player."""
         player = self.state.players[player_name]
-        bid, log = player.bid()
+        bid, log = await player.bid()
         if bid is None:
             raise ValueError(
                 f"{player_name} did not return a valid bid. Find the raw response"
@@ -166,7 +170,7 @@ class GameMaster:
             tqdm.tqdm.write(f"{player_name} bid: {bid}")
         return bid, log
 
-    def get_next_speaker(self):
+    async def get_next_speaker(self):
         """Determine the next speaker based on bids."""
         previous_speaker, previous_dialogue = (
             self.this_round.debate[-1] if self.this_round.debate else (None, None)
@@ -182,22 +186,14 @@ class GameMaster:
         if not ai_players_to_bid:
             return None
 
-        with ThreadPoolExecutor(max_workers=self.num_threads) as executor:
-            player_bids = {
-                player_name: executor.submit(self._get_bid, player_name)
-                for player_name in ai_players_to_bid
-            }
-
-            bid_log = []
-            bids = {}
-            try:
-                for player_name, bid_task in player_bids.items():
-                    bid, log = bid_task.result()
-                    bids[player_name] = bid
-                    bid_log.append((player_name, log))
-            except TypeError as e:
-                print(e)
-                raise e
+        bid_coroutines = [self._get_bid(player_name) for player_name in ai_players_to_bid]
+        bid_results = await asyncio.gather(*bid_coroutines)
+        bid_log = []
+        bids = {}
+        for i, player_name in enumerate(ai_players_to_bid):
+            bid, log = bid_results[i]
+            bids[player_name] = bid
+            bid_log.append((player_name, log))
 
         self.this_round.bids.append(bids)
         self.this_round_log.bid.append(bid_log)
@@ -212,19 +208,23 @@ class GameMaster:
         random.shuffle(potential_speakers)
         return random.choice(potential_speakers)
 
-    def run_summaries(self):
+    async def run_summaries(self):
         """Collect summaries from players after the debate."""
 
-        with ThreadPoolExecutor(max_workers=self.num_threads) as executor:
-            player_summaries = {
-                name: executor.submit(self.state.players[name].summarize)
-                for name in self.this_round.players
-            }
+        players = self.this_round.players
+        summary_coroutines = [self.state.players[name].summarize() for name in players]
+        summary_results = await asyncio.gather(*summary_coroutines)
 
-            for player_name, summary_task in player_summaries.items():
-                summary, log = summary_task.result()
-                tqdm.tqdm.write(f"{player_name} summary: {summary}")
-                self.this_round_log.summaries.append((player_name, log))
+        summaries = {}
+        summary_log = []
+        for i, player_name in enumerate(players):
+            summary, log = summary_results[i]
+            if summary is not None:
+                summaries[player_name] = summary
+            summary_log.append((player_name, log))
+
+        self.this_round.summaries = summaries
+        self.this_round_log.summaries = summary_log
 
     async def run_day_phase(self):
         """Run the day phase which consists of the debate and voting."""
@@ -244,6 +244,7 @@ class GameMaster:
             human_can_speak = (
                 self.human_player and self.human_player.name in self.this_round.players
             )
+            tqdm.tqdm.write(f"Human can speak: {human_can_speak}, human name: {self.human_player.name} in this round: {self.this_round.players}")
 
             if human_can_speak:
                 # Check if human player wants to speak using LiveKit bid system
@@ -254,7 +255,7 @@ class GameMaster:
                     next_speaker = self.human_player.name
 
             if next_speaker is None:
-                next_speaker = self.get_next_speaker()
+                next_speaker = await self.get_next_speaker()
 
             if not next_speaker:
                 tqdm.tqdm.write("No one else wishes to speak. The debate concludes.")
@@ -290,7 +291,7 @@ class GameMaster:
             # Synthetic votes are for AI-only simulations to see how votes shift.
             # This should not run during interactive play.
             if RUN_SYNTHETIC_VOTES and not self.human_player:
-                votes, vote_logs = self.run_voting()
+                votes, vote_logs = await self.run_voting()
                 self.this_round.votes.append(votes)
                 self.this_round_log.votes.append(vote_logs)
 
@@ -303,36 +304,35 @@ class GameMaster:
                     "phase": "voting",
                     "message": "The debate has concluded. Time to vote."
                 })
-            votes, vote_logs = self.run_voting()
+            votes, vote_logs = await self.run_voting()
             self.this_round.votes.append(votes)
             self.this_round_log.votes.append(vote_logs)
 
         for player, vote in self.this_round.votes[-1].items():
             tqdm.tqdm.write(f"{player} voted to remove {vote}")
 
-    def run_voting(self):
+    async def run_voting(self):
         """Conduct a vote among players to exile someone."""
         vote_log = []
         votes = {}
 
-        with ThreadPoolExecutor(max_workers=self.num_threads) as executor:
-            player_votes = {
-                name: executor.submit(self.state.players[name].vote)
-                for name in self.this_round.players
-            }
+        players = self.this_round.players
+        vote_coroutines = [self.state.players[name].vote() for name in players]
+        vote_results = await asyncio.gather(*vote_coroutines)
 
-            for player_name, vote_task in player_votes.items():
-                vote, log = vote_task.result()
-                vote_log.append(VoteLog(player_name, vote, log))
+        for i, player_name in enumerate(players):
+            vote, log = vote_results[i]
+            vote_log.append((player_name, vote, log))
 
-                if vote is not None:
-                    votes[player_name] = vote
-                else:
-                    self.this_round.votes.append(votes)
-                    self.this_round_log.votes.append(vote_log)
-                    raise ValueError(
-                        f"{player_name} vote did not return a valid player."
-                    )
+            if vote is not None:
+                votes[player_name] = vote
+            else:
+                self.this_round.votes.append(votes)
+                self.this_round_log.votes.append(vote_log)
+                raise ValueError(
+                    f"{player_name} did not return a valid vote. Find the raw "
+                    "response in the log file."
+                )
 
         return votes, vote_log
 

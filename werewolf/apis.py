@@ -13,41 +13,41 @@
 # limitations under the License.
 
 
-from openai import OpenAI
+from openai import AsyncOpenAI
 import os
 
 from typing import Any
 import google
 from google import genai
-from anthropic import AnthropicVertex
+from anthropic import AsyncAnthropicVertex
 
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 # Initialize Google GenAI client
 genai_client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
 
 
-def generate(model, **kwargs):
+async def generate(model, **kwargs):
     if "gpt" in model:
-        return generate_openai(model, **kwargs)
+        return await generate_openai(model, **kwargs)
     elif "claude" in model:
-        return generate_authropic(model, **kwargs)
+        return await generate_authropic(model, **kwargs)
     else:
-        return generate_genai(model, **kwargs)
+        return await generate_genai(model, **kwargs)
 
 
 # openai
-def generate_openai(
+async def generate_openai(
     model: str, prompt: str, json_mode: bool = True, temperature: float = 1.0, **kwargs
 ):
     response_format = {"type": "text"}
     if json_mode:
         response_format = {"type": "json_object"}
-    response = client.chat.completions.create(
+    response = await client.chat.completions.create(
         messages=[{"role": "user", "content": prompt}],
         response_format=response_format,
         model=model,
@@ -59,14 +59,14 @@ def generate_openai(
 
 
 # anthropic
-def generate_authropic(model: str, prompt: str, **kwargs):
+async def generate_authropic(model: str, prompt: str, **kwargs):
     # For local development, run `gcloud auth application-default login` first to
     # create the application default credentials, which will be picked up
     # automatically here.
     _, project_id = google.auth.default()
-    client = AnthropicVertex(region="us-east5", project_id=project_id)
+    client = AsyncAnthropicVertex(region="us-east5", project_id=project_id)
 
-    response = client.messages.create(
+    response = await client.messages.create(
         model=model, messages=[{"role": "user", "content": prompt}], max_tokens=1024
     )
 
@@ -74,7 +74,7 @@ def generate_authropic(model: str, prompt: str, **kwargs):
 
 
 # google genai (replacing vertexai)
-def generate_genai(
+async def generate_genai(
     model: str,
     prompt: str,
     temperature: float = 0.7,
@@ -95,7 +95,7 @@ def generate_genai(
             config["response_schema"] = json_schema
 
     try:
-        response = genai_client.models.generate_content(
+        response = await genai_client.aio.models.generate_content(
             model=model,
             contents=prompt,
             config=config
@@ -106,7 +106,7 @@ def generate_genai(
     except Exception as e:
         # Fallback without JSON constraints if there's an error
         try:
-            response = genai_client.models.generate_content(
+            response = await genai_client.aio.models.generate_content(
                 model=model,
                 contents=prompt,
                 config={"temperature": temperature}
@@ -117,7 +117,7 @@ def generate_genai(
 
 
 # Keep the old function name for backward compatibility
-def generate_vertexai(
+async def generate_vertexai(
     model: str,
     prompt: str,
     temperature: float = 0.7,
@@ -126,4 +126,4 @@ def generate_vertexai(
     **kwargs,
 ) -> str:
     """Legacy function - redirects to generate_genai for backward compatibility."""
-    return generate_genai(model, prompt, temperature, json_mode, json_schema, **kwargs)
+    return await generate_genai(model, prompt, temperature, json_mode, json_schema, **kwargs)

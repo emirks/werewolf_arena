@@ -23,6 +23,7 @@ from werewolf.prompts import ACTION_PROMPTS_AND_SCHEMAS
 from werewolf.utils import Deserializable
 from werewolf.config import MAX_DEBATE_TURNS, NUM_PLAYERS
 from werewolf.livekit_participant import LiveKitParticipant
+from werewolf.pipecat_ai_player import PipecatAIPlayer
 
 # Role names
 VILLAGER = "Villager"
@@ -111,7 +112,7 @@ class GameView:
         return cls(**data)
 
 
-class Player(LiveKitParticipant):
+class Player(PipecatAIPlayer):
     """Represents a player in the game."""
 
     def __init__(
@@ -121,7 +122,7 @@ class Player(LiveKitParticipant):
         model: Optional[str] = None,
         personality: Optional[str] = "",
     ):
-        LiveKitParticipant.__init__(self, name)
+        super().__init__(name, role, personality)
         self.role = role
         self.personality = personality
         self.model = model
@@ -184,7 +185,7 @@ class Player(LiveKitParticipant):
             "num_villagers": NUM_PLAYERS - 4,
         }
 
-    def _generate_action(
+    async def _generate_action(
         self,
         action: str,
         options: Optional[List[str]] = None,
@@ -204,7 +205,7 @@ class Player(LiveKitParticipant):
         # Set temperature based on allowed_values
         temperature = 0.5 if allowed_values else 1.0
 
-        result, log = generate(
+        result, log = await generate(
             prompt_template,
             response_schema,
             game_state,
@@ -215,7 +216,7 @@ class Player(LiveKitParticipant):
         )
         return result, log
 
-    def vote(self) -> tuple[str | None, LmLog]:
+    async def vote(self) -> tuple[str | None, LmLog]:
         """Vote for a player."""
         if not self.gamestate:
             raise ValueError(
@@ -225,16 +226,16 @@ class Player(LiveKitParticipant):
             player for player in self.gamestate.current_players if player != self.name
         ]
         random.shuffle(options)
-        vote, log = self._generate_action("vote", options)
+        vote, log = await self._generate_action("vote", options)
         if vote is not None and len(self.gamestate.debate) == MAX_DEBATE_TURNS:
             self._add_observation(
                 f"After the debate, I voted to remove {vote} from the game."
             )
         return vote, log
 
-    def bid(self) -> tuple[int | None, LmLog]:
+    async def bid(self) -> tuple[int | None, LmLog]:
         """Place a bid."""
-        bid, log = self._generate_action("bid", options=["0", "1", "2", "3", "4"])
+        bid, log = await self._generate_action("bid", options=["0", "1", "2", "3", "4"])
         if bid is not None:
             bid = int(bid)
             self.bidding_rationale = log.result.get("reasoning", "")
@@ -242,18 +243,17 @@ class Player(LiveKitParticipant):
 
     async def debate(self) -> tuple[str | None, LmLog]:
         """Engage in the debate."""
-        result, log = self._generate_action("debate", [])
+        result, log = await self._generate_action("debate", [])
         if result is not None:
             say = result.get("say", None)
             if say:
-                # Use the speak function to broadcast the AI's speech
-                spoken_text, speak_log = await self.speak(say)
+                await self.speak(say)
             return say, log
         return result, log
 
-    def summarize(self) -> tuple[str | None, LmLog]:
+    async def summarize(self) -> tuple[str | None, LmLog]:
         """Summarize the game state."""
-        result, log = self._generate_action("summarize", [])
+        result, log = await self._generate_action("summarize", [])
         if result is not None:
             summary = result.get("summary", None)
             if summary is not None:
@@ -326,7 +326,7 @@ class Werewolf(Player):
         state["werewolf_context"] = self._get_werewolf_context()
         return state
 
-    def eliminate(self) -> tuple[str | None, "LmLog"]:
+    async def eliminate(self) -> tuple[str | None, "LmLog"]:
         """Choose a player to eliminate."""
         if not self.gamestate:
             raise ValueError(
@@ -339,7 +339,7 @@ class Werewolf(Player):
             if player != self.name and player != self.gamestate.other_wolf
         ]
         random.shuffle(options)
-        eliminate, log = self._generate_action("remove", options)
+        eliminate, log = await self._generate_action("remove", options)
         return eliminate, log
 
     def _get_werewolf_context(self):
@@ -381,7 +381,7 @@ class Seer(Player):
         super().__init__(name=name, role=SEER, model=model, personality=personality)
         self.previously_unmasked: Dict[str, str] = {}
 
-    def unmask(self) -> tuple[str | None, LmLog]:
+    async def unmask(self) -> tuple[str | None, LmLog]:
         """Choose a player to unmask."""
         if not self.gamestate:
             raise ValueError(
@@ -394,7 +394,7 @@ class Seer(Player):
             if player != self.name and player not in self.previously_unmasked.keys()
         ]
         random.shuffle(options)
-        return self._generate_action("investigate", options)
+        return await self._generate_action("investigate", options)
 
     def reveal_and_update(self, player, role):
         self._add_observation(
@@ -425,7 +425,7 @@ class Doctor(Player):
     ):
         super().__init__(name=name, role=DOCTOR, model=model, personality=personality)
 
-    def save(self) -> tuple[str | None, LmLog]:
+    async def save(self) -> tuple[str | None, LmLog]:
         """Choose a player to protect."""
         if not self.gamestate:
             raise ValueError(
@@ -434,7 +434,7 @@ class Doctor(Player):
 
         options = list(self.gamestate.current_players)
         random.shuffle(options)
-        protected, log = self._generate_action("protect", options)
+        protected, log = await self._generate_action("protect", options)
         if protected is not None:
             self._add_observation(f"During the night, I chose to protect {protected}")
         return protected, log
@@ -773,7 +773,7 @@ class HumanPlayer(Player):
         )
         return summary, log
 
-    def eliminate(self) -> tuple[str | None, "LmLog"]:
+    async def eliminate(self) -> tuple[str | None, "LmLog"]:
         self._display_gamestate()
         options = [
             p

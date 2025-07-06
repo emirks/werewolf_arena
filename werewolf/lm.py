@@ -37,7 +37,7 @@ def format_prompt(prompt_template, worldstate) -> str:
     return jinja2.Template(prompt_template).render(worldstate)
 
 
-def generate(
+async def generate(
     prompt_template: str,
     response_schema: Dict[str, Any],
     worldstate: Dict[str, Any],
@@ -69,7 +69,7 @@ def generate(
     for _ in range(RETRIES):
         raw_resp = None
         try:
-            raw_resp = apis.generate(
+            raw_resp = await apis.generate(
                 model=model,
                 prompt=prompt,
                 response_schema=response_schema,
