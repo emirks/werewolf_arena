@@ -25,7 +25,8 @@
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.current-phase, .player-role {
+.current-phase,
+.player-role {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -33,7 +34,8 @@
   font-size: 0.9rem;
 }
 
-.phase-name, .role-name {
+.phase-name,
+.role-name {
   font-weight: 600;
   text-transform: capitalize;
   padding: 0.2rem 0.5rem;
@@ -236,6 +238,84 @@
   align-items: center;
 }
 
+/* Target selection */
+.target-selection {
+  background: rgba(255, 152, 0, 0.1);
+  border: 1px solid rgba(255, 152, 0, 0.3);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+.target-selection h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  color: #ff9800;
+  font-size: 1rem;
+  text-align: center;
+}
+
+/* Speaking prompt */
+.speaking-prompt {
+  background: rgba(76, 175, 80, 0.15);
+  border: 2px solid #4caf50;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  animation: pulse 2s infinite;
+}
+
+.pulse-animation {
+  width: 12px;
+  height: 12px;
+  background: #4caf50;
+  border-radius: 50%;
+  animation: pulse 1.5s infinite;
+}
+
+.speaking-message h3 {
+  margin: 0 0 0.5rem 0;
+  color: #4caf50;
+  font-size: 1.1rem;
+}
+
+.speaking-message p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.9rem;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.4);
+  }
+
+  70% {
+    box-shadow: 0 0 0 10px rgba(76, 175, 80, 0);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
+  }
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .game-ui {
@@ -246,11 +326,11 @@
     border-left: none;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
   }
-  
+
   .player-selection {
     grid-template-columns: 1fr;
   }
-  
+
   .game-log {
     max-height: 200px;
   }

@@ -1,30 +1,32 @@
 import { useState } from 'react';
 import '../styles/GameUI.css';
 
-export const GameUI = ({ 
-  gameState, 
-  onVote, 
-  onAction, 
-  playerName, 
-  currentTurn, 
-  maxTurns, 
-  canSpeak, 
-  isVoting, 
-  onVoteSubmit, 
-  votedPlayer 
+export const GameUI = ({
+  gameState,
+  onVote,
+  onAction,
+  onTargetSelection,
+  playerName,
+  currentTurn,
+  maxTurns,
+  canSpeak,
+  isVoting,
+  onVoteSubmit,
+  votedPlayer
 }) => {
   const [selectedPlayer, setSelectedPlayer] = useState(null);
-  const { 
-    phase, 
-    players = [], 
+  const {
+    phase,
+    players = [],
     currentPlayer = {},
     currentSpeaker,
-    voting = {}
+    voting = {},
+    targetSelection = {}
   } = gameState;
-  
+
   // Calculate remaining turns if maxTurns is provided in props or gameState
   const remainingTurns = (gameState.maxTurns || maxTurns || 5) - (currentTurn || 1) + 1;
-  
+
   const handlePlayerSelect = (playerId) => {
     setSelectedPlayer(playerId === selectedPlayer ? null : playerId);
   };
@@ -61,13 +63,13 @@ export const GameUI = ({
             </div>
           </div>
         );
-      
+
       case 'day':
         return (
           <div className="phase-ui">
             <h3>Day Phase</h3>
             <p>Discuss and vote to eliminate a player</p>
-            
+
             <div className="player-selection">
               {players.map((player) => (
                 <button
@@ -81,8 +83,8 @@ export const GameUI = ({
                 </button>
               ))}
             </div>
-            
-            <button 
+
+            <button
               className="action-button"
               onClick={handleVote}
               disabled={!selectedPlayer}
@@ -91,21 +93,21 @@ export const GameUI = ({
             </button>
           </div>
         );
-      
+
       case 'night':
         const isWerewolf = currentPlayer?.role === 'werewolf';
         const isSeer = currentPlayer?.role === 'seer';
-        
+
         return (
           <div className="phase-ui">
             <h3>Night Phase</h3>
             <p>Werewolves, choose your target. Villagers, close your eyes.</p>
-            
+
             {currentPlayer?.isAlive ? (
               <>
                 <div className="player-selection">
                   {players
-                    .filter(player => 
+                    .filter(player =>
                       (isWerewolf && player.role !== 'werewolf' && player.isAlive) ||
                       (isSeer && player.isAlive)
                     )
@@ -120,8 +122,8 @@ export const GameUI = ({
                       </button>
                     ))}
                 </div>
-                
-                <button 
+
+                <button
                   className="action-button"
                   onClick={() => handleAction(isSeer ? 'inspect' : 'kill')}
                   disabled={!selectedPlayer}
@@ -134,7 +136,7 @@ export const GameUI = ({
             )}
           </div>
         );
-      
+
       case 'end':
         return (
           <div className="phase-ui">
@@ -150,7 +152,7 @@ export const GameUI = ({
                 ))}
               </ul>
             </div>
-            <button 
+            <button
               className="action-button"
               onClick={() => window.location.reload()}
             >
@@ -158,7 +160,7 @@ export const GameUI = ({
             </button>
           </div>
         );
-      
+
       default:
         return null;
     }
@@ -168,15 +170,15 @@ export const GameUI = ({
     <div className="game-ui">
       <div className="game-info">
         <div className="phase-badge">{phase.toUpperCase()}</div>
-        
+
         {/* Show turn information for day phase */}
         {phase === 'day' && (
           <div className="turn-info">
             <div className="turn-counter">
-              Turn: {currentTurn || 1}/{gameState.maxTurns || maxTurns || 5} • 
+              Turn: {currentTurn || 1}/{gameState.maxTurns || maxTurns || 5} •
               {remainingTurns} turn{remainingTurns !== 1 ? 's' : ''} remaining
             </div>
-            
+
             {/* Show current speaker */}
             {currentSpeaker && (
               <div className="current-speaker">
@@ -189,7 +191,7 @@ export const GameUI = ({
             )}
           </div>
         )}
-        
+
         {/* Show voting status */}
         {voting.isActive && (
           <div className="voting-status">
@@ -204,6 +206,23 @@ export const GameUI = ({
           <div className="speaking-message">
             <h3>You can speak now!</h3>
             <p>Share your thoughts with the village</p>
+          </div>
+        </div>
+      )}
+
+      {targetSelection?.active && (
+        <div className="target-selection">
+          <h3>{targetSelection.prompt || `Choose target for ${targetSelection.action}`}</h3>
+          <div className="player-selection">
+            {targetSelection.options?.map((playerName) => (
+              <button
+                key={playerName}
+                className="player-button"
+                onClick={() => onTargetSelection && onTargetSelection(playerName)}
+              >
+                {playerName}
+              </button>
+            ))}
           </div>
         </div>
       )}

@@ -36,11 +36,19 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
       role: playerRole,
       isHost: false
     },
+    logs: [], // Add logs array to store game events
+    announcements: [], // Add announcements array
+    targetSelection: { // Add target selection state
+      active: false,
+      action: null,
+      options: [],
+      prompt: ''
+    },
   });
-  
+
   // Track mounted state to prevent state updates after unmount
   const isMounted = useRef(true);
-  
+
   // // Cleanup on unmount
   // useEffect(() => {
   //   return () => {
@@ -55,13 +63,13 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
     const onParticipantConnected = (participant) => {
       console.log('Participant connected:', participant.identity);
       if (!isMounted.current) return;
-      
+
       setParticipants(prev => {
         // Don't add if already in the list
         if (prev.some(p => p.identity === participant.identity)) return prev;
         return [...prev, participant];
       });
-      
+
       // Add to game state
       setGameState(prev => ({
         ...prev,
@@ -80,9 +88,9 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
     const onParticipantDisconnected = (participant) => {
       console.log('Participant disconnected:', participant.identity);
       if (!isMounted.current) return;
-      
+
       setParticipants(prev => prev.filter((p) => p.identity !== participant.identity));
-      
+
       // Update game state
       setGameState(prev => ({
         ...prev,
@@ -96,12 +104,12 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
         setParticipantTracks(prev => {
           const newTracks = new Map(prev);
           const participantTracks = newTracks.get(participant.identity) || [];
-          
+
           // Don't add duplicate tracks
           if (!participantTracks.some(t => t.sid === track.sid)) {
             newTracks.set(participant.identity, [...participantTracks, track]);
           }
-          
+
           return newTracks;
         });
       }
@@ -113,14 +121,14 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
         setParticipantTracks(prev => {
           const newTracks = new Map(prev);
           const participantTracks = newTracks.get(participant.identity) || [];
-          
+
           if (participantTracks.length > 0) {
             newTracks.set(
               participant.identity,
               participantTracks.filter(t => t.sid !== track.sid)
             );
           }
-          
+
           return newTracks;
         });
       }
@@ -129,7 +137,8 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
     const onDataReceived = (data, participant, kind, topic) => {
       try {
         const message = JSON.parse(new TextDecoder().decode(data));
-        console.log('Received game message:', message, 'from', participant.identity);
+        console.log('Received game message of type:', message.type, 'and update_type:', message.update_type, 'with data:', message.data, 'from', participant.identity);
+        console.log('Full message structure:', JSON.stringify(message, null, 2)); // Debug full message
         handleGameMessage(message);
       } catch (error) {
         console.error('Error parsing message:', error);
@@ -139,7 +148,7 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
     // Set initial participants
     const initialParticipants = Array.from(room.remoteParticipants.values());
     setParticipants(initialParticipants);
-    
+
     // Initialize game state with existing participants
     setGameState(prev => ({
       ...prev,
@@ -150,7 +159,7 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
         role: 'villager'
       }))
     }));
-    
+
     // Set up event listeners
     room
       .on('participantConnected', onParticipantConnected)
@@ -169,174 +178,298 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
     };
   }, [room]);
 
-  const handleGameMessage = useCallback((message) => {
-    if (!isMounted.current) return;
-    
-    console.log('Handling game message:', message);
-    
-    switch (message.type) {
-      case 'game_state':
-        switch (message.update_type) {
-          case 'game_state_update':
-            setGameState(prev => {
-              // Update current turn from game state if available
-              if (message.data.currentTurn) {
-                setCurrentTurn(message.data.currentTurn);
-              }
-              return {
-                ...prev,
-                ...message.data,
-                players: message.data.players || prev.players
-              };
-            });
-            break;
-          case 'day_phase_start':
-            setGameState(prev => ({
-              ...prev,
-              players: message.data.players || prev.players,
-              phase: 'day',
-              currentTurn: message.data.round || 1,
-              maxTurns: message.data.maxTurns || 5
-            }));
-            setCurrentTurn(message.data.round || 1);
-            break;
-            
-          case 'debate_update':
-            setGameState(prev => ({
-              ...prev,
-              currentTurn: message.data.round,
-              currentSpeaker: message.data.speaker,
-              maxTurns: message.data.maxTurns
-            }));
-            setCurrentTurn(message.data.round);
-            
-            // If it's the local player's turn, show speaking prompt
-            if (message.data.speaker === playerName) {
-              setCanSpeak(true);
-              // Auto-hide after speaking time is done
-              const speakTime = message.data.speakTime || 30; // Default 30 seconds
-              setTimeout(() => setCanSpeak(false), speakTime * 1000);
-            }
-            break;
-            
-          case 'player_update':
-            setGameState(prev => ({
-              ...prev,
-              players: prev.players.map(p => 
-                p.id === message.data.id ? { ...p, ...message.data } : p
-              )
-            }));
-            break;
+  // Helper functions for message handling
+  const updateGameLogs = useCallback((logMessage) => {
+    setGameState(prev => ({
+      ...prev,
+      logs: [...prev.logs, logMessage]
+    }));
+  }, []);
 
-          case 'voting_started':
-            setIsVoting(true);
-            setVotedPlayer(null);
-            // Update game state to voting phase
-            setGameState(prev => ({
-              ...prev,
-              phase: 'voting',
-              voting: {
-                ...prev.voting,
-                isActive: true,
-                votes: {}
-              }
-            }));
-            break;
-            
-          case 'voting_ended':
-            setIsVoting(false);
-            setGameState(prev => ({
-              ...prev,
-              voting: {
-                ...prev.voting,
-                isActive: false
-              }
-            }));
-            break;
-            
-          case 'vote_received':
-            const { voter, target } = message.data;
-            if (voter === room.localParticipant.identity) {
-              setVotedPlayer(target);
-            }
-            
-            // Update voting state
-            setGameState(prev => ({
-              ...prev,
-              voting: {
-                ...prev.voting,
-                votes: {
-                  ...prev.voting?.votes,
-                  [voter]: target
-                }
-              }
-            }));
-            break;
-            
-          case 'phase_change':
-            setGameState(prev => ({
-              ...prev,
-              phase: message.data.phase,
-              phaseData: message.data
-            }));
-            break;      
-            
-          default:
-            break;
+  const updateGamePhase = useCallback((phase, additionalData = {}) => {
+    setGameState(prev => ({
+      ...prev,
+      phase,
+      ...additionalData
+    }));
+  }, []);
+
+  // Message handlers for different types
+  const handleGameStateUpdate = useCallback((message) => {
+    const { update_type, data } = message;
+
+    switch (update_type) {
+      case 'game_state':
+        // Full game state update
+        setGameState(prev => ({
+          ...prev,
+          ...data,
+          players: data.players || prev.players,
+          logs: [...prev.logs, '🎮 Game state updated']
+        }));
+        break;
+
+      case 'day_phase_start':
+        setGameState(prev => ({
+          ...prev,
+          players: data.players || prev.players,
+          phase: 'day',
+          currentTurn: data.round || 1,
+          maxTurns: data.maxTurns || 5,
+          logs: [...prev.logs, `🌅 Day ${data.round || 1} begins! Debate and vote to eliminate a player.`]
+        }));
+        setCurrentTurn(data.round || 1);
+        break;
+
+      case 'night_phase_start':
+        setGameState(prev => ({
+          ...prev,
+          players: data.players || prev.players,
+          phase: 'night',
+          currentTurn: data.round || 1,
+          logs: [...prev.logs, `🌙 Night ${data.round || 1} falls. Special roles, make your moves...`]
+        }));
+        setCurrentTurn(data.round || 1);
+        break;
+
+      case 'debate_update':
+        console.log('Processing debate_update:', data);
+        setGameState(prev => {
+          const newLogs = [...prev.logs];
+
+          if (data?.dialogue && data?.speaker) {
+            newLogs.push(`💬 ${data.speaker}: ${data.dialogue}`);
+            console.log('Added debate log:', `💬 ${data.speaker}: ${data.dialogue}`);
+          }
+
+          return {
+            ...prev,
+            currentTurn: data?.turn,
+            currentSpeaker: data?.speaker,
+            maxTurns: data?.maxTurns,
+            logs: newLogs
+          };
+        });
+        setCurrentTurn(data?.turn);
+
+        // If it's the local player's turn, show speaking prompt
+        if (data?.speaker === playerName) {
+          setCanSpeak(true);
+          const speakTime = data?.speakTime || 30;
+          setTimeout(() => setCanSpeak(false), speakTime * 1000);
+        }
+        break;
+
+      case 'voting_phase':
+        updateGamePhase('voting');
+        updateGameLogs(`🗳️ ${data.message || 'Voting phase has begun'}`);
+        break;
+
+      case 'voting_started':
+        setIsVoting(true);
+        setVotedPlayer(null);
+        setGameState(prev => ({
+          ...prev,
+          phase: 'voting',
+          voting: { ...prev.voting, isActive: true, votes: {} },
+          logs: [...prev.logs, '🗳️ Voting has started!']
+        }));
+        break;
+
+      case 'voting_ended':
+        setIsVoting(false);
+        setGameState(prev => ({
+          ...prev,
+          voting: { ...prev.voting, isActive: false },
+          logs: [...prev.logs, '🗳️ Voting has ended.']
+        }));
+        break;
+
+      case 'vote_received':
+        const { voter, target } = data;
+        if (voter === room.localParticipant.identity) {
+          setVotedPlayer(target);
+        }
+        setGameState(prev => ({
+          ...prev,
+          voting: {
+            ...prev.voting,
+            votes: { ...prev.voting?.votes, [voter]: target }
+          },
+          logs: [...prev.logs, `🗳️ ${voter} voted for ${target}`]
+        }));
+        break;
+
+      case 'voting_results':
+        if (data.message) {
+          updateGameLogs(`📊 ${data.message}`);
+        }
+        if (data.results) {
+          const { vote_counts, most_voted, vote_count } = data.results;
+          updateGameLogs(`📊 Results: ${Object.entries(vote_counts).map(([player, votes]) => `${player}: ${votes}`).join(', ')}`);
+        }
+        break;
+
+      case 'player_exiled':
+        if (data.player) {
+          updateGameLogs(`⚰️ ${data.player} has been eliminated from the game!`);
+          // Remove player from active players list
+          setGameState(prev => ({
+            ...prev,
+            players: prev.players.map(p =>
+              p.id === data.player ? { ...p, isAlive: false } : p
+            )
+          }));
+        }
+        break;
+
+      case 'player_update':
+        setGameState(prev => ({
+          ...prev,
+          players: prev.players.map(p =>
+            p.id === data.id ? { ...p, ...data } : p
+          )
+        }));
+        break;
+
+      case 'phase_change':
+        updateGamePhase(data.phase, { phaseData: data });
+        updateGameLogs(`⏰ Phase changed to: ${data.phase}`);
+        break;
+
+      default:
+        console.log('Unhandled game_state_update type:', update_type);
+    }
+  }, [playerName, room, updateGameLogs, updateGamePhase]);
+
+  const handleDirectMessage = useCallback((message) => {
+    const { type, data, prompt, options, action, timeout, text, timestamp } = message;
+
+    switch (type) {
+      case 'request_vote':
+        // Show voting UI
+        setIsVoting(true);
+        setVotedPlayer(null);
+        updateGameLogs(`🗳️ ${prompt || 'Please cast your vote'}`);
+        // Could show available options in UI
+        if (options) {
+          console.log('Voting options:', options);
         }
         break;
 
       case 'can_speak':
         setCanSpeak(true);
-        // Auto-hide after specified time or default to 5 seconds
-        const speakTime = message.data?.timeout ? message.data.timeout * 1000 : 5000;
+        const speakTime = timeout ? timeout * 1000 : 5000;
         setTimeout(() => setCanSpeak(false), speakTime);
+        updateGameLogs(`🎤 ${prompt || 'You can speak now'}`);
         break;
-                
+
+      case 'speaking_ended':
+        setCanSpeak(false);
+        updateGameLogs(`🔇 Speaking time ended`);
+        break;
+
+      case 'debate_turn':
+        setCanSpeak(true);
+        updateGameLogs(`💬 ${prompt || 'Your turn to speak'}`);
+        break;
+
+      case 'request_target_selection':
+        // Show target selection UI
+        updateGameLogs(`🎯 ${prompt || `Choose target for ${action}`}`);
+        // Could show available options
+        if (options) {
+          console.log('Target selection options:', options);
+          // Update UI to show target selection
+          setGameState(prev => ({
+            ...prev,
+            targetSelection: {
+              active: true,
+              action: action,
+              options: options,
+              prompt: prompt
+            }
+          }));
+        }
+        break;
+
+      case 'announcement':
+        if (text) {
+          updateGameLogs(`📢 ${text}`);
+          setGameState(prev => ({
+            ...prev,
+            announcements: [...prev.announcements, {
+              id: Date.now(),
+              message: text,
+              timestamp: timestamp || Date.now()
+            }]
+          }));
+        }
+        break;
+
       default:
-        console.log('Unhandled message type:', message.type);
+        console.log('Unhandled direct message type:', type);
     }
-  }, []);
+  }, [updateGameLogs]);
+
+  const handleGameMessage = useCallback((message) => {
+    if (!isMounted.current) return;
+
+    console.log('Handling game message:', message);
+
+    try {
+      // Route to appropriate handler based on message structure
+      if (message.type === 'game_state_update') {
+        handleGameStateUpdate(message);
+      } else {
+        // Handle direct message types
+        handleDirectMessage(message);
+      }
+    } catch (error) {
+      console.error('Error handling game message:', error, message);
+      updateGameLogs(`❌ Error processing game message: ${error.message}`);
+    }
+  }, [handleGameStateUpdate, handleDirectMessage, updateGameLogs]);
 
   const handleVote = useCallback((playerId) => {
     if (!room) return;
-    
+
     const message = {
       type: 'vote',
       target: playerId,
       voter: room.localParticipant.identity
     };
-    
+
     room.localParticipant.publishData(
       new TextEncoder().encode(JSON.stringify(message)),
       { reliable: true }
     );
-    
+
     // Update local state
     setVotedPlayer(playerId);
   }, [room]);
 
   const handleVoteSubmit = useCallback(() => {
     if (!room || !votedPlayer) return;
-    
+
     const message = {
       type: 'submit_vote',
       target: votedPlayer,
       voter: room.localParticipant.identity
     };
-    
+
     room.localParticipant.publishData(
       new TextEncoder().encode(JSON.stringify(message)),
       { reliable: true }
     );
-    
+
     // Disable voting UI after submission
     setIsVoting(false);
   }, [room, votedPlayer]);
 
   const toggleMute = useCallback(async () => {
     if (!room) return;
-    
+
     try {
       if (isMuted) {
         await room.localParticipant.setMicrophoneEnabled(true);
@@ -351,7 +484,7 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
 
   const sendMessage = useCallback((message) => {
     if (!room) return false;
-    
+
     try {
       const payload = JSON.stringify(message);
       room.localParticipant.publishData(
@@ -364,7 +497,7 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
       return false;
     }
   }, [room]);
-  
+
   const handleAction = useCallback((action, target) => {
     sendMessage({
       type: 'action',
@@ -373,6 +506,34 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
       timestamp: Date.now()
     });
   }, [sendMessage]);
+
+  const handleTargetSelection = useCallback((target) => {
+    if (!room) return;
+
+    const message = {
+      type: 'target_selection',
+      target: target,
+      player: room.localParticipant.identity
+    };
+
+    room.localParticipant.publishData(
+      new TextEncoder().encode(JSON.stringify(message)),
+      { reliable: true }
+    );
+
+    // Clear target selection UI
+    setGameState(prev => ({
+      ...prev,
+      targetSelection: {
+        active: false,
+        action: null,
+        options: [],
+        prompt: ''
+      }
+    }));
+
+    console.log('Target selection sent:', message);
+  }, [room]);
 
   const sendChatMessage = useCallback((message) => {
     sendMessage({
@@ -395,13 +556,13 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
       <div className="game-header">
         <h2>Room: {roomName}</h2>
         <div className="player-info">
-          {playerName} ({playerRole}) 
+          {playerName} ({playerRole})
           <span className={`connection-status ${room.state === 'connected' ? 'connected' : 'disconnected'}`}>
             {room.state === 'connected' ? '●' : '○'}
           </span>
         </div>
       </div>
-      
+
       <div className="game-content">
         <div className="participants-grid">
           {participants.map((participant) => {
@@ -418,12 +579,13 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
             );
           })}
         </div>
-        
+
         <div className="game-ui-container">
           <GameUI
             gameState={gameState}
             onVote={handleVote}
             onAction={handleAction}
+            onTargetSelection={handleTargetSelection}
             onChatMessage={sendChatMessage}
             playerName={playerName}
             playerRole={playerRole}
@@ -436,13 +598,13 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
           />
         </div>
       </div>
-      
-      <AudioControls 
+
+      <AudioControls
         isMuted={isMuted}
         onToggleMute={toggleMute}
         onDisconnect={() => room.disconnect()}
       />
-      
+
       {gameState.announcements?.length > 0 && (
         <div className="announcements">
           {gameState.announcements.map(announcement => (
