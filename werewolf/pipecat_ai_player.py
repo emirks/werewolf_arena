@@ -6,20 +6,22 @@ import os
 import json
 
 from livekit import api
-from pipecat.transports.services.livekit import LiveKitTransport, LiveKitParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineTask, PipelineParams
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai import OpenAITTSService, OpenAILLMService
+from pipecat.services.openai.tts import VALID_VOICES
 from pipecat.frames.frames import TTSSpeakFrame
 
+from werewolf.livekit_transport import LiveKitTransport, LiveKitParams
 from werewolf.utils import Deserializable
 from werewolf.frame_processors import (
     TTSOutputProcessor, 
     GameStateProcessor,
     DataChannelProcessor
 )
+from werewolf.config import NAMES
 import re
 
 logger = logging.getLogger(__name__)
@@ -66,6 +68,17 @@ class PipecatAIPlayer(Deserializable):
         self.livekit_api_key = os.getenv("LIVEKIT_API_KEY")
         self.livekit_api_secret = os.getenv("LIVEKIT_API_SECRET")
 
+    def _get_voice_for_name(self, name: str) -> str:
+        """Select a consistent TTS voice based on the player's name."""
+        # List of available OpenAI TTS voices
+        voices = list(VALID_VOICES.keys())
+        
+        # Create a simple hash of the name to get a consistent index
+        name_index = NAMES.index(name)
+        voice_index = name_index % len(voices)
+        
+        return voices[voice_index]
+
     async def setup_pipecat_pipeline(self, room_name: str):
         """Setup Pipecat pipeline with LiveKit transport for AI output."""
         try:
@@ -102,8 +115,7 @@ class PipecatAIPlayer(Deserializable):
             # Create TTS service
             self._tts_service = OpenAITTSService(
                 api_key=os.getenv("OPENAI_API_KEY"),
-                voice="alloy",
-                model="tts-1",
+                voice=self._get_voice_for_name(self.name),
             )
             
             # Create LLM service and context
