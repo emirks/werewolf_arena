@@ -262,7 +262,9 @@ class Player(PipecatAIPlayer):
             return summary, log
         return result, log
 
-    async def send_game_state_update(self, update_type: str, data: Dict[str, Any] = None):
+    async def send_game_state_update(
+        self, update_type: str, data: Dict[str, Any] = None
+    ):
         """Send game state update through LiveKit data channel (for human players)."""
         # This method will be overridden by HumanPlayer to actually send data
         pass
