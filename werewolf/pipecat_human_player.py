@@ -7,7 +7,6 @@ import json
 import enum
 
 from livekit import api
-from pipecat.transports.services.livekit import LiveKitTransport, LiveKitParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineTask, PipelineParams
 from pipecat.pipeline.runner import PipelineRunner
@@ -15,6 +14,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from werewolf.soniox_stt_service import SonioxSTTService
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 
+from werewolf.livekit_transport import LiveKitTransport, LiveKitParams
 from werewolf.utils import Deserializable
 from werewolf.lm import LmLog
 from werewolf.model import GameView, group_and_format_observations, Player, SEER
@@ -139,7 +139,7 @@ class PipecatHumanPlayer(Deserializable):
             )
             
             # Create frame processors
-            transcription_processor = TranscriptionProcessor(
+            self.transcription_processor = TranscriptionProcessor(
                 update_user_speaking_cb=lambda speaking: setattr(self, '_user_speaking', speaking),
                 update_speech_detected_cb=lambda detected: setattr(self, '_speech_detected_in_window', detected),
                 update_transcription_cb=lambda text: setattr(self, '_last_transcription', text),
@@ -161,7 +161,7 @@ class PipecatHumanPlayer(Deserializable):
                 self._transport.input(),  # Audio input from LiveKit
                 # speech_detection_processor,  # Detect speech in audio
                 stt_service,  # Convert speech to text
-                transcription_processor,  # Process transcription results
+                self.transcription_processor,  # Process transcription results
                 # data_channel_processor,  # Handle data channel messages
                 self._transport.output(),  # Audio output to LiveKit
             ]
@@ -253,7 +253,7 @@ class PipecatHumanPlayer(Deserializable):
             
         try:
             await self._transport.send_message(json.dumps(message), participant_id=self.name)
-            logger.info(f"Sent data message: {message}")
+            # logger.info(f"Sent data message: {message}")
         except Exception as e:
             logger.error(f"Error sending data message: {e}")
 
@@ -387,43 +387,89 @@ class PipecatHumanPlayer(Deserializable):
         
         return vote, log
 
-    async def bid(self) -> Tuple[Optional[int], LmLog]:
-        """Check for user speech within 5 seconds to determine bid."""
+    async def bid(self) -> Tuple[float, LmLog]:
+        """Bid to speak during the debate phase.
+        
+        Returns:
+            Tuple containing the bid amount (0-1) and a log entry
+        """
+        logger.info(f"Requesting bid from {self.name}")
+        
+        # Reset speech detection state
+        self._speech_detected = False
+        self._user_speaking = False
+        
+        # Create an event to signal when speech is detected
+        speech_detected_event = asyncio.Event()
+        
+        def on_speech_detected(detected: bool):
+            if detected and not self._speech_detected:
+                self._speech_detected = True
+                speech_detected_event.set()
+        
+        # Store the original callback
+        original_callback = getattr(self.transcription_processor, '_update_speech_detected_cb', None)
+        
+        # Update the callback
+        self.transcription_processor._update_speech_detected_cb = on_speech_detected
+        
+        # Wait for either speech detection or timeout
         try:
-            # Reset speech detection flag
-            self._speech_detected_in_window = False
-            
             # Send message that user can speak
             await self.send_data_message("can_speak", {
-                "prompt": "You can speak now if you want to join the debate (you have 5 seconds)"
+                "prompt": "You can speak now if you want to join the debate (you have 5 seconds)",
+                "timeout": 5
             })
             
-            # Wait 5 seconds and check for speech
-            await asyncio.sleep(5.0)
+            logger.info(f"Waiting for speech from {self.name}...")
             
-            if self._speech_detected_in_window:
-                bid = 4  # Highest bid if speech detected
-                self.bidding_rationale = "User started speaking, indicating desire to participate"
-            else:
-                bid = 0  # No speech detected
-                self.bidding_rationale = "No speech detected, user doesn't want to speak"
-            
-            log = LmLog(
-                prompt=f"USER_BID: Speech detection window",
-                raw_resp=str(bid),
-                result={"bid": bid, "reasoning": self.bidding_rationale}
-            )
-            
-            return bid, log
-            
+            try:
+                await asyncio.wait_for(
+                    speech_detected_event.wait(),
+                    timeout=5.0  # 5 second timeout for speaking
+                )
+                
+                logger.info(f"Player {self.name} detected speech, bidding to speak")
+                return 1.0, LmLog(
+                    prompt="SPEECH_DETECTED",
+                    raw_resp="1",
+                    result={
+                        "bid": 1.0,
+                        "reasoning": "User started speaking, indicating desire to participate"
+                    }
+                )
+                
+            except asyncio.TimeoutError:
+                logger.info(f"Player {self.name} did not speak within timeout")
+                return 0.0, LmLog(
+                    prompt="NO_SPEECH_DETECTED",
+                    raw_resp="0",
+                    result={
+                        "bid": 0.0,
+                        "reasoning": "No speech detected within time limit"
+                    }
+                )
+                
         except Exception as e:
-            logger.error(f"Error in bid detection: {e}")
-            log = LmLog(
-                prompt="USER_BID_ERROR",
-                raw_resp="0",
-                result={"bid": 0, "reasoning": "Error in speech detection"}
+            logger.error(f"Error in bid for {self.name}: {e}", exc_info=True)
+            return 0.0, LmLog(
+                prompt="BID_ERROR",
+                raw_resp=str(e),
+                result={"error": str(e)}
             )
-            return 0, log
+            
+        finally:
+            # Restore the original callback
+            if hasattr(self, 'transcription_processor'):
+                self.transcription_processor._update_speech_detected_cb = original_callback
+                
+            # Ensure speaking prompt is cleared
+            try:
+                await self.send_data_message("speaking_ended", {
+                    "message": "Speaking time is over"
+                })
+            except Exception as e:
+                logger.warning(f"Error sending speaking_ended message: {e}")
 
     async def debate(self) -> Tuple[Optional[str], LmLog]:
         """Wait for user to stop speaking and get transcription."""
@@ -569,7 +615,7 @@ class PipecatHumanPlayer(Deserializable):
         }
         
         if data:
-            update_data.update(data)
+            update_data["data"] = data
         
         await self.send_data_message("game_state_update", update_data)
     
