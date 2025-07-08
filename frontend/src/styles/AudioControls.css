@@ -1,0 +1,124 @@
+/* Audio controls container */
+.audio-controls {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(10px);
+  padding: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  z-index: 1000;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Mute button */
+.mute-button {
+  background: #4a90e2;
+  color: white;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  border-radius: 50px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+}
+
+.mute-button:hover {
+  background: #3a7bc8;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.mute-button:active {
+  transform: translateY(0);
+}
+
+.mute-button.muted {
+  background: #e74c3c;
+}
+
+.mute-button.muted:hover {
+  background: #c0392b;
+}
+
+/* Audio level container */
+.audio-level-container {
+  width: 100px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Audio level bar */
+.audio-level {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 0%;
+  background: #4a90e2;
+  transition: transform 0.1s ease-out;
+  transform-origin: left center;
+}
+
+.mute-button.muted + .audio-level-container .audio-level {
+  background: #e74c3c;
+}
+
+/* Audio hint text */
+.audio-hint {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: color 0.3s ease;
+}
+
+.mute-button.muted ~ .audio-hint {
+  color: #e74c3c;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .audio-controls {
+    padding: 0.8rem 1rem;
+    gap: 1rem;
+  }
+  
+  .mute-button {
+    padding: 0.5rem 1rem;
+    font-size: 0.8rem;
+  }
+  
+  .audio-level-container {
+    width: 80px;
+    height: 5px;
+  }
+  
+  .audio-hint {
+    font-size: 0.8rem;
+  }
+}
+
+/* Animation for audio level */
+@keyframes audioLevelPulse {
+  0% { transform: scaleX(0.2); }
+  50% { transform: scaleX(1); }
+  100% { transform: scaleX(0.2); }
+}
+
+/* Apply animation when audio is active */
+.audio-level.active {
+  animation: audioLevelPulse 1.5s infinite ease-in-out;
+}
