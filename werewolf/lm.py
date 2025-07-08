@@ -70,7 +70,6 @@ async def generate(
         raw_resp = None
         try:
             raw_resp = await apis.generate(
-                model=model,
                 prompt=prompt,
                 response_schema=response_schema,
                 temperature=temperature,

@@ -14,21 +14,22 @@
 
 """Werewolf game."""
 
-from collections import Counter
-
-import random
 import asyncio
+import logging
 import os
-from typing import List
+import random
+from collections import Counter
+from typing import List, Optional, Tuple, Any
 
 import tqdm
 from livekit import api
 
-from werewolf.pipecat_human_player import PipecatHumanPlayer
-from werewolf.model import Round, RoundLog, State, VoteLog
-from werewolf.human_player import HumanPlayer
 from werewolf.config import MAX_DEBATE_TURNS, RUN_SYNTHETIC_VOTES
+from werewolf.model import LmLog, Round, RoundLog, State
+from werewolf.pipecat_human_player import PipecatHumanPlayer
 
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 def get_max_bids(d):
     """Gets all the keys with the highest value in the dictionary."""
@@ -53,7 +54,7 @@ class GameMaster:
         self.current_round_num = len(self.state.rounds) if self.state.rounds else 0
         self.num_threads = num_threads
         self.logs: List[RoundLog] = []
-        self.human_player: HumanPlayer | None = None
+        self.human_player: PipecatHumanPlayer | None = None
         self.room_name = room_name or f"werewolf_game_{state.session_id}"
         
         # Find human player
@@ -244,7 +245,6 @@ class GameMaster:
             human_can_speak = (
                 self.human_player and self.human_player.name in self.this_round.players
             )
-            tqdm.tqdm.write(f"Human can speak: {human_can_speak}, human name: {self.human_player.name} in this round: {self.this_round.players}")
 
             if human_can_speak:
                 # Check if human player wants to speak using LiveKit bid system
@@ -315,39 +315,119 @@ class GameMaster:
         """Conduct a vote among players to exile someone."""
         vote_log = []
         votes = {}
-
         players = self.this_round.players
-        vote_coroutines = [self.state.players[name].vote() for name in players]
-        vote_results = await asyncio.gather(*vote_coroutines)
-
-        for i, player_name in enumerate(players):
-            vote, log = vote_results[i]
-            vote_log.append((player_name, vote, log))
-
-            if vote is not None:
-                votes[player_name] = vote
+        
+        # Notify all players that voting has started
+        if self.human_player:
+            await self.human_player.send_game_state_update("voting_started", {
+                "players": [{"id": p, "name": p} for p in players],
+                "message": "Voting has started. Please select a player to eliminate."
+            })
+        
+        # Collect votes from all players
+        vote_coroutines = []
+        for name in players:
+            player = self.state.players[name]
+            if isinstance(player, PipecatHumanPlayer):
+                # For human players, wait for their vote through the UI
+                vote_coroutines.append(self._collect_human_vote(player))
             else:
-                self.this_round.votes.append(votes)
-                self.this_round_log.votes.append(vote_log)
-                raise ValueError(
-                    f"{player_name} did not return a valid vote. Find the raw "
-                    "response in the log file."
-                )
-
+                # For AI players, get their vote directly
+                vote_coroutines.append(player.vote())
+        
+        # Wait for all votes to be cast with a timeout
+        try:
+            vote_results = await asyncio.wait_for(
+                asyncio.gather(*vote_coroutines, return_exceptions=True),
+                timeout=60  # 60 second timeout for voting
+            )
+            
+            # Process the votes
+            for i, result in enumerate(vote_results):
+                player_name = players[i]
+                if isinstance(result, Exception):
+                    logger.error(f"Error getting vote from {player_name}: {result}")
+                    continue
+                    
+                vote, log = result
+                vote_log.append((player_name, vote, log))
+                
+                if vote is not None:
+                    votes[player_name] = vote
+                    
+                    # Notify about the vote
+                    if self.human_player:
+                        await self.human_player.send_game_state_update("vote_received", {
+                            "voter": player_name,
+                            "target": vote
+                        })
+        except asyncio.TimeoutError:
+            logger.warning("Voting timed out, proceeding with current votes")
+            
+        # Notify that voting has ended
+        if self.human_player:
+            await self.human_player.send_game_state_update("voting_ended", {
+                "votes": votes,
+                "message": "Voting has concluded."
+            })
+            
         return votes, vote_log
+        
+    async def _collect_human_vote(self, human_player):
+        """Helper method to collect vote from human player with timeout."""
+        try:
+            # This will wait for the human to vote through the UI
+            vote, log = await asyncio.wait_for(
+                human_player.vote(),
+                timeout=30  # 30 seconds for human to vote
+            )
+            return vote, log
+        except asyncio.TimeoutError:
+            logger.warning(f"{human_player.name} did not vote in time")
+            return None, LmLog(
+                prompt="VOTE_TIMEOUT",
+                raw_resp="",
+                result={"error": "Vote not received in time"}
+            )
 
     async def exile(self):
         """Exile the player who received the most votes."""
+        if not self.this_round.votes:
+            logger.warning("No votes recorded in this round")
+            return
+            
+        vote_counts = Counter(self.this_round.votes[-1].values())
+        if not vote_counts:
+            logger.warning("No valid votes to count")
+            return
+            
+        most_voted, vote_count = vote_counts.most_common(1)[0]
+        total_voters = len([p for p in self.this_round.players if p in self.this_round.votes[-1]])
+        
+        # Notify about the voting results
+        if self.human_player:
+            await self.human_player.send_game_state_update("voting_results", {
+                "results": {
+                    "vote_counts": dict(vote_counts),
+                    "most_voted": most_voted,
+                    "vote_count": vote_count,
+                    "total_voters": total_voters,
+                    "majority_needed": total_voters / 2
+                },
+                "message": f"Voting results: {most_voted} received {vote_count} votes"
+            })
 
-        most_voted, vote_count = Counter(
-            self.this_round.votes[-1].values()
-        ).most_common(1)[0]
-
-        if vote_count > len(self.this_round.players) / 2:
+        if vote_count > total_voters / 2:
             self.this_round.exiled = most_voted
 
         if self.this_round.exiled is not None:
             exiled_player = self.this_round.exiled
+            # Notify about the exile
+            if self.human_player:
+                await self.human_player.send_game_state_update("player_exiled", {
+                    "player": exiled_player,
+                    "votes": vote_count
+                })
             announcement = (
                 f"The majority voted to remove {exiled_player} from the game."
             )

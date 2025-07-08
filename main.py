@@ -120,7 +120,7 @@ async def start_game(request: StartGameRequest):
         werewolves = [
             Werewolf(name=player_names.pop(), model=request.werewolf_model) for _ in range(2)
         ]
-        villagers = [Villager(name=name, model=request.villager_model) for name in player_names[:3]]
+        villagers = [Villager(name=name, model=request.villager_model) for name in player_names]
         
         # Create human player using PipecatHumanPlayer
         human_player = PipecatHumanPlayer(
