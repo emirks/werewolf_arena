@@ -31,12 +31,12 @@ client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 # Initialize Cerebras client
 cerebras_client = AsyncOpenAI(
     base_url="https://api.cerebras.ai/v1",
-    api_key=os.environ.get("CEREBRAS_API_KEY", "")
+    api_key=os.environ.get("CEREBRAS_API_KEY", ""),
 )
 
 DEFAULT_MODEL = "openai"
 
-DEFAULT_OPENAI_MODEL = "gpt-4.1-mini-2025-04-14"
+DEFAULT_OPENAI_MODEL = "gpt-4o"
 DEFAULT_CLAUDE_MODEL = "claude-3-5-sonnet-20240620"
 DEFAULT_CEREBRAS_MODEL = "llama-4-scout-17b-16e-instruct"
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite-preview-06-17"
@@ -85,7 +85,9 @@ async def generate_authropic(prompt: str, **kwargs):
     client = AsyncAnthropicVertex(region="us-east5", project_id=project_id)
 
     response = await client.messages.create(
-        model=DEFAULT_CLAUDE_MODEL, messages=[{"role": "user", "content": prompt}], max_tokens=1024
+        model=DEFAULT_CLAUDE_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=1024,
     )
 
     return response.content[0].text
@@ -100,11 +102,11 @@ async def generate_genai(
     **kwargs,
 ) -> str:
     """Generates text content using Google GenAI client."""
-    
+
     config = {
         "temperature": temperature,
     }
-    
+
     # Add JSON mode configuration if requested
     if json_mode or json_schema is not None:
         config["response_mime_type"] = "application/json"
@@ -113,20 +115,18 @@ async def generate_genai(
 
     try:
         response = await genai_client.aio.models.generate_content(
-            model=DEFAULT_GEMINI_MODEL,
-            contents=prompt,
-            config=config
+            model=DEFAULT_GEMINI_MODEL, contents=prompt, config=config
         )
-        
+
         return response.text
-        
+
     except Exception as e:
         # Fallback without JSON constraints if there's an error
         try:
             response = await genai_client.aio.models.generate_content(
                 model=DEFAULT_GEMINI_MODEL,
                 contents=prompt,
-                config={"temperature": temperature}
+                config={"temperature": temperature},
             )
             return response.text
         except Exception as fallback_error:
@@ -141,17 +141,17 @@ async def generate_cerebras(
 ) -> str:
     """
     Generate text using Cerebras API with the specified model.
-    
+
     Args:
         model: The model to use (e.g., 'llama-4-scout-17b-16e-instruct')
         prompt: The input prompt
         temperature: Controls randomness (0.0 to 1.0)
         json_mode: If True, enables JSON mode (note: not compatible with streaming)
         **kwargs: Additional parameters for the API call
-        
+
     Returns:
         The generated text response
-        
+
     Note:
         Cerebras API doesn't support the following OpenAI features:
         - frequency_penalty
@@ -159,48 +159,50 @@ async def generate_cerebras(
         - presence_penalty
         - parallel_tool_calls
         - service_tier
-        
+
         JSON mode is not compatible with streaming.
     """
-    
+
     # Prepare parameters
     params = {
         "model": DEFAULT_CEREBRAS_MODEL,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": max(0, min(1.0, temperature)),  # Clamp to 0-1 range
     }
-    
+
     # Add JSON mode if requested
     if json_mode:
         if kwargs.get("stream", False):
-            raise ValueError("JSON mode is not compatible with streaming in Cerebras API")
+            raise ValueError(
+                "JSON mode is not compatible with streaming in Cerebras API"
+            )
         params["response_format"] = {"type": "json_object"}
-    
+
     # Filter out unsupported parameters
     unsupported_params = [
-        'frequency_penalty',
-        'logit_bias',
-        'presence_penalty',
-        'parallel_tool_calls',
-        'service_tier',
-        'response_schema',
-        'disable_recitation',
-        'disable_safety_check'
+        "frequency_penalty",
+        "logit_bias",
+        "presence_penalty",
+        "parallel_tool_calls",
+        "service_tier",
+        "response_schema",
+        "disable_recitation",
+        "disable_safety_check",
     ]
     for param in unsupported_params:
         if param in kwargs:
             del kwargs[param]
-    
+
     # Merge additional parameters
     params.update(kwargs)
-    
+
     try:
         response = await cerebras_client.chat.completions.create(**params)
-        
-        if hasattr(response, 'choices') and len(response.choices) > 0:
+
+        if hasattr(response, "choices") and len(response.choices) > 0:
             return response.choices[0].message.content
         else:
             raise ValueError("Unexpected response format from Cerebras API")
-            
+
     except Exception as e:
         raise Exception(f"Error calling Cerebras API: {str(e)}")
