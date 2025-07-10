@@ -206,8 +206,19 @@ class PipecatHumanPlayer(Deserializable):
 
             # Start the pipeline in background
             asyncio.create_task(self._pipeline_runner.run(self._pipeline_task))
+            
+            self.connected_event = asyncio.Event()
+            @self._transport.event_handler("on_connected")
+            async def on_connected(transport):
+                logger.info(f"{self.name} connected to LiveKit")
+                self._connected = True
+                self.connected_event.set()
+            
+            @self._transport.event_handler("on_disconnected")
+            async def on_disconnected(transport):
+                logger.info(f"{self.name} disconnected from LiveKit")
+                self._connected = False
 
-            self._connected = True
             logger.info(f"Pipecat pipeline setup complete for {self.name}")
 
         except Exception as e:
@@ -265,8 +276,11 @@ class PipecatHumanPlayer(Deserializable):
     async def send_data_message(self, message: Dict[str, Any]):
         """Send a message through the data channel."""
         if not self._connected or not self._transport:
-            logger.warning("Not connected to LiveKit, cannot send data message")
-            return
+            logger.warning("Not connected to LiveKit, waiting for connection")
+            await self.connected_event.wait()
+            if not self._connected or not self._transport:
+                logger.error("Still not connected to LiveKit after waiting")
+                return
 
         try:
             await self._transport.send_message(
