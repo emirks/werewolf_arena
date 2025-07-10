@@ -1,39 +1,82 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Room, Track } from 'livekit-client';
-import { joinRoom, startGameSession } from '../utils/api';
+import { createRoom, joinRoom, setReady, getRoomStatus, startGameSession } from '../utils/api';
 
-export const useLiveKit = (initialRoomName, playerName, onConnected, onDisconnected) => {
+export const useLiveKit = (playerName) => {
   const [room, setRoom] = useState(null);
-  const [roomName, setRoomName] = useState(initialRoomName);
+  const [roomId, setRoomId] = useState('');
+  const [roomName, setRoomName] = useState('');
+  const [isCreator, setIsCreator] = useState(false);
   const [participants, setParticipants] = useState([]);
   const [audioTracks, setAudioTracks] = useState(new Map());
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
+  const [roomPlayers, setRoomPlayers] = useState({});
+  const [allReady, setAllReady] = useState(false);
 
-  // Connect to LiveKit room
-  const connect = useCallback(async () => {
+  // Create a new room
+  const createNewRoom = useCallback(async (customRoomName) => {
     if (!playerName || isConnecting) return;
 
     setIsConnecting(true);
     setError(null);
 
     try {
+      // Create room on backend
+      const roomData = await createRoom(customRoomName, playerName);
+      
+      setRoomId(roomData.room_id);
+      setRoomName(roomData.room_name);
+      setIsCreator(true);
+      
+      // Connect to LiveKit room
+      await connectToRoom(roomData.room_id, playerName);
+      
+      return roomData;
+    } catch (err) {
+      console.error('Error creating room:', err);
+      setError(err.message || 'Failed to create room');
+      throw err;
+    } finally {
+      setIsConnecting(false);
+    }
+  }, [playerName, isConnecting]);
+
+  // Join an existing room
+  const joinExistingRoom = useCallback(async (targetRoomId) => {
+    if (!playerName || isConnecting) return;
+
+    setIsConnecting(true);
+    setError(null);
+
+    try {
+      await connectToRoom(targetRoomId, playerName);
+      return { room_id: targetRoomId };
+    } catch (err) {
+      console.error('Error joining room:', err);
+      setError(err.message || 'Failed to join room');
+      throw err;
+    } finally {
+      setIsConnecting(false);
+    }
+  }, [playerName, isConnecting]);
+
+  // Connect to LiveKit room
+  const connectToRoom = useCallback(async (targetRoomId, targetPlayerName) => {
+    try {
       // Join the room and get LiveKit connection details
-      const { url, token, room_name } = await joinRoom(playerName);
+      const connectionData = await joinRoom(targetRoomId, targetPlayerName);
       
-      // Update the room name from the server response
-      setRoomName(room_name);
+      setRoomId(connectionData.room_id);
+      setRoomName(connectionData.room_name);
+      setIsCreator(connectionData.creator === targetPlayerName);
       
-      // Create a new room
+      // Create a new LiveKit room
       const newRoom = new Room({
-        // Automatically manage audio/video tracks
         autoSubscribe: true,
-        // Adaptive bitrate for better quality
         adaptiveStream: true,
-        // Enable dynacast for better quality on varying network conditions
         dynacast: true,
-        // Optimize for audio conferencing
         audioCaptureDefaults: {
           echoCancellation: true,
           noiseSuppression: true,
@@ -54,7 +97,7 @@ export const useLiveKit = (initialRoomName, playerName, onConnected, onDisconnec
         .on('localTrackUnpublished', handleLocalTrackUnpublished);
 
       // Connect to the LiveKit server
-      await newRoom.connect(url, token, {
+      await newRoom.connect(connectionData.url, connectionData.token, {
         autoSubscribe: true,
       });
 
@@ -64,19 +107,52 @@ export const useLiveKit = (initialRoomName, playerName, onConnected, onDisconnec
       setRoom(newRoom);
       setParticipants(Array.from(newRoom.remoteParticipants.values()));
       
-      if (onConnected) {
-        onConnected(newRoom);
-      }
-      
       return newRoom;
     } catch (err) {
       console.error('Error connecting to LiveKit:', err);
-      setError(err.message || 'Failed to connect to the room');
       throw err;
-    } finally {
-      setIsConnecting(false);
     }
-  }, [roomName, playerName, isConnecting, onConnected]);
+  }, []);
+
+  // Set ready status
+  const setPlayerReady = useCallback(async (isReady) => {
+    if (!roomId || !playerName) return;
+    
+    try {
+      await setReady(roomId, playerName, isReady);
+      await updateRoomStatus();
+    } catch (error) {
+      console.error('Error setting ready status:', error);
+      throw error;
+    }
+  }, [roomId, playerName]);
+
+  // Update room status
+  const updateRoomStatus = useCallback(async () => {
+    if (!roomId) return;
+    
+    try {
+      const status = await getRoomStatus(roomId);
+      setRoomPlayers(status.players);
+      setAllReady(status.all_ready);
+    } catch (error) {
+      console.error('Error updating room status:', error);
+    }
+  }, [roomId]);
+
+  // Start the game
+  const startGame = useCallback(async () => {
+    if (!roomId || !isCreator) return;
+    
+    try {
+      const playerNames = Object.keys(roomPlayers);
+      const gameState = await startGameSession(roomId, playerNames);
+      return gameState;
+    } catch (error) {
+      console.error('Error starting game:', error);
+      throw error;
+    }
+  }, [roomId, isCreator, roomPlayers]);
 
   // Disconnect from the room
   const disconnect = useCallback(async () => {
@@ -84,31 +160,19 @@ export const useLiveKit = (initialRoomName, playerName, onConnected, onDisconnec
     
     try {
       await room.disconnect();
-      if (onDisconnected) {
-        onDisconnected();
-      }
     } catch (err) {
       console.error('Error disconnecting from room:', err);
     } finally {
       setRoom(null);
+      setRoomId('');
       setRoomName('');
+      setIsCreator(false);
       setParticipants([]);
       setAudioTracks(new Map());
+      setRoomPlayers({});
+      setAllReady(false);
     }
-  }, [room, onDisconnected]);
-  
-  // Start the game
-  const startGame = useCallback(async (playerRole) => {
-    if (!roomName || !playerName) return;
-    
-    try {
-      const gameState = await startGameSession(roomName, playerName, playerRole);
-      return gameState;
-    } catch (error) {
-      console.error('Error starting game:', error);
-      throw error;
-    }
-  }, [roomName, playerName]);
+  }, [room]);
 
   // Toggle mute state
   const toggleMute = useCallback(async () => {
@@ -134,7 +198,6 @@ export const useLiveKit = (initialRoomName, playerName, onConnected, onDisconnec
   const handleParticipantDisconnected = useCallback((participant) => {
     setParticipants((prev) => prev.filter((p) => p.sid !== participant.sid));
     
-    // Clean up audio tracks for this participant
     setAudioTracks((prev) => {
       const newTracks = new Map(prev);
       newTracks.delete(participant.sid);
@@ -186,11 +249,15 @@ export const useLiveKit = (initialRoomName, playerName, onConnected, onDisconnec
     setRoom(null);
     setParticipants([]);
     setAudioTracks(new Map());
-    
-    if (onDisconnected) {
-      onDisconnected();
-    }
-  }, [onDisconnected]);
+  }, []);
+
+  // Poll for room status updates
+  useEffect(() => {
+    if (!roomId) return;
+
+    const interval = setInterval(updateRoomStatus, 2000); // Poll every 2 seconds
+    return () => clearInterval(interval);
+  }, [roomId, updateRoomStatus]);
 
   // Clean up on unmount
   useEffect(() => {
@@ -203,15 +270,22 @@ export const useLiveKit = (initialRoomName, playerName, onConnected, onDisconnec
 
   return {
     room,
+    roomId,
     roomName,
+    isCreator,
     participants,
     audioTracks,
     isConnecting,
     error,
     isMuted,
-    connect,
+    roomPlayers,
+    allReady,
+    createNewRoom,
+    joinExistingRoom,
+    setPlayerReady,
+    updateRoomStatus,
     disconnect,
-    startGame: startGameSession,
+    startGame,
     toggleMute,
   };
 };
