@@ -111,15 +111,45 @@ const VotingInterface = ({ voting, players, playerName, onVote }) => {
   );
 };
 
+const SpeakingPrompt = ({ interaction }) => {
+  if (!interaction?.can_speak) return null;
+
+  return (
+    <div className="speaking-prompt">
+      <div className="mic-icon">
+        <div className="pulse-ring"></div>
+        <svg viewBox="0 0 24 24" width="24" height="24">
+          <path fill="currentColor" d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5z"/>
+          <path fill="currentColor" d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+        </svg>
+      </div>
+      <div className="prompt-content">
+        <h3>You can speak now!</h3>
+        <p>{interaction.speaking_prompt || 'Share your thoughts with the village'}</p>
+      </div>
+    </div>
+  );
+};
+
 const GameLog = ({ logs }) => (
   <div className="game-log">
     <h3>Game Events</h3>
     <div className="log-entries">
-      {logs?.slice(-5).map((log, index) => (
-        <div key={index} className="log-entry">
-          {log}
-        </div>
-      ))}
+      {logs?.slice(-5).map((log, index) => {
+        const isAction = log.includes('killed') || log.includes('eliminated') || log.includes('protected');
+        const isAnnouncement = log.includes('Phase') || log.includes('Round');
+        const isVote = log.includes('voted');
+        
+        return (
+          <div 
+            key={index} 
+            className={`log-entry ${isAction ? 'action' : ''} ${isAnnouncement ? 'announcement' : ''} ${isVote ? 'vote' : ''}`}
+          >
+            <span className="log-time">{new Date().toLocaleTimeString()}</span>
+            <span className="log-text">{log}</span>
+          </div>
+        );
+      })}
     </div>
   </div>
 );
@@ -165,7 +195,8 @@ export const GameUI = ({
     currentPlayer = {},
     debate = {},
     voting = {},
-    logs = []
+    logs = [],
+    interaction = {}
   } = gameState;
 
   return (
@@ -174,6 +205,9 @@ export const GameUI = ({
       
       <div className="game-ui-content">
         <PlayersList players={players} currentPlayer={currentPlayer} />
+        
+        {/* Show speaking prompt at the top when active */}
+        <SpeakingPrompt interaction={interaction} />
         
         {phase === 'day' && (
           <DebateStatus debate={debate} playerName={playerName} />

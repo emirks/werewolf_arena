@@ -49,6 +49,67 @@
   overflow-y: auto;
 }
 
+/* Speaking Prompt */
+.speaking-prompt {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  background-color: rgba(99, 102, 241, 0.1);
+  border: 1px solid var(--primary-color);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.mic-icon {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary-color);
+}
+
+.pulse-ring {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 2px solid var(--primary-color);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.4;
+  }
+  100% {
+    transform: scale(0.95);
+    opacity: 0.8;
+  }
+}
+
+.prompt-content {
+  flex: 1;
+}
+
+.prompt-content h3 {
+  color: var(--primary-color);
+  margin-bottom: var(--spacing-xs);
+  font-size: 1rem;
+}
+
+.prompt-content p {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
 /* Players List */
 .players-list {
   background-color: var(--background-color);
@@ -68,14 +129,21 @@
   gap: var(--spacing-sm);
 }
 
+/* Player Cards */
 .player-item {
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
-  padding: var(--spacing-sm);
+  padding: var(--spacing-md);
   background-color: var(--surface-color);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
+  transition: all 0.2s ease;
+}
+
+.player-item:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
 }
 
 .player-item.self {
@@ -84,34 +152,41 @@
 }
 
 .player-item.eliminated {
-  opacity: 0.6;
+  opacity: 0.7;
+  background-color: rgba(239, 68, 68, 0.05);
+  border-color: var(--error-color);
 }
 
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .status-dot.alive {
   background-color: var(--success-color);
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2);
 }
 
 .status-dot.dead {
   background-color: var(--error-color);
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
 }
 
 .player-name {
   flex: 1;
-  font-size: 0.875rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--text-primary);
 }
 
 .eliminated-tag {
   font-size: 0.75rem;
   color: var(--error-color);
+  background-color: rgba(239, 68, 68, 0.1);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
 }
 
 /* Debate Status */
@@ -238,12 +313,25 @@
   background-color: var(--background-color);
   border-radius: var(--radius-md);
   padding: var(--spacing-md);
+  margin-top: auto;
 }
 
 .game-log h3 {
   font-size: 1rem;
   margin-bottom: var(--spacing-md);
   color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.game-log h3::before {
+  content: '';
+  display: block;
+  width: 4px;
+  height: 16px;
+  background-color: var(--primary-color);
+  border-radius: 2px;
 }
 
 .log-entries {
@@ -253,10 +341,39 @@
 }
 
 .log-entry {
-  padding: var(--spacing-sm);
+  display: flex;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
   background-color: var(--surface-color);
   border-radius: var(--radius-sm);
+  border-left: 4px solid transparent;
   font-size: 0.875rem;
+}
+
+.log-time {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.log-text {
+  flex: 1;
+  color: var(--text-primary);
+}
+
+.log-entry.action {
+  border-left-color: var(--error-color);
+  background-color: rgba(239, 68, 68, 0.05);
+}
+
+.log-entry.announcement {
+  border-left-color: var(--primary-color);
+  background-color: rgba(99, 102, 241, 0.05);
+}
+
+.log-entry.vote {
+  border-left-color: var(--success-color);
+  background-color: rgba(34, 197, 94, 0.05);
 }
 
 /* Phase Info */
