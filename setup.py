@@ -18,8 +18,9 @@ setup(
         "uvicorn[standard]",
         "pydantic",
         "livekit",
+        "livekit-api",
         "aiohttp",
-        "pipecat-ai",
+        "pipecat-ai>=0.0.72",
         "pipecat-ai[openai, silero]",
     ],
 ) 
