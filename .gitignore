@@ -5,3 +5,5 @@ logs/
 node_modules/
 static/index.js
 .env
+
+*.egg-info/

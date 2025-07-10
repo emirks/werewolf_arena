@@ -406,10 +406,6 @@ async def get_game_status(room_name: str):
         "active": room_name in active_games,
     }
 
-
-# Serve static files
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

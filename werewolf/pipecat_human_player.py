@@ -11,15 +11,15 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineTask, PipelineParams
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from werewolf.soniox_stt_service import SonioxSTTService
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 
-from werewolf.livekit_transport import LiveKitTransport, LiveKitParams
+from werewolf.pipecat_services.soniox_stt_service import SonioxSTTService
+from werewolf.pipecat_services.livekit_transport import LiveKitTransport, LiveKitParams
 from werewolf.utils import Deserializable
 from werewolf.lm import LmLog
 from werewolf.model import GameView, group_and_format_observations, Player, SEER
 from werewolf.config import MAX_DEBATE_TURNS, NUM_PLAYERS
-from werewolf.frame_processors import (
+from werewolf.pipecat_services.frame_processors import (
     TranscriptionProcessor,
     DataChannelProcessor,
     GameStateProcessor,

@@ -10,9 +10,9 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.services.openai.tts import VALID_VOICES, OpenAITTSService
 from pipecat.frames.frames import TTSSpeakFrame
 
-from werewolf.livekit_transport import LiveKitTransport, LiveKitParams
+from werewolf.pipecat_services.livekit_transport import LiveKitTransport, LiveKitParams
 from werewolf.utils import Deserializable
-from werewolf.frame_processors import (
+from werewolf.pipecat_services.frame_processors import (
     TTSOutputProcessor, 
 )
 from werewolf.config import NAMES

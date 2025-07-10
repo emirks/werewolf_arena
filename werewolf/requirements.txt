@@ -11,8 +11,6 @@ fastapi
 uvicorn[standard]
 pydantic
 livekit
-livekit-agents
-livekit-plugins-openai
 aiohttp
 pipecat-ai
 pipecat-ai[openai, silero]
