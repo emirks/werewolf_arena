@@ -1,1205 +1,303 @@
-/* Game UI container */
 .game-ui {
-  position: fixed;
-  top: 0;
-  right: 0;
-  width: 300px;
-  height: 100%;
-  background: rgba(15, 15, 26, 0.9);
-  backdrop-filter: blur(10px);
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
-  padding: 1rem;
   display: flex;
   flex-direction: column;
-  z-index: 100;
-  overflow-y: auto;
-  transition: transform 0.3s ease;
+  height: 100%;
+  background-color: var(--surface-color);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
 
-/* Game info section */
-.game-info {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 8px;
-  padding: 1rem;
-  margin-bottom: 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.current-phase,
-.player-role {
+/* Game Status */
+.game-status {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.5rem;
-  font-size: 0.9rem;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  background-color: var(--background-color);
+  border-bottom: 1px solid var(--border-color);
 }
 
-.phase-name,
-.role-name {
+.status-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.status-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+
+.status-value {
+  font-size: 1.125rem;
   font-weight: 600;
-  text-transform: capitalize;
-  padding: 0.2rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.85rem;
+  color: var(--text-primary);
 }
 
-.phase-name.day {
-  background: rgba(74, 144, 226, 0.2);
-  color: #4a90e2;
+.status-value.phase-day { color: var(--primary-color); }
+.status-value.phase-night { color: var(--text-secondary); }
+.status-value.phase-voting { color: var(--error-color); }
+
+/* Game UI Content */
+.game-ui-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  overflow-y: auto;
 }
 
-.phase-name.night {
-  background: rgba(155, 89, 182, 0.2);
-  color: #9b59b6;
+/* Players List */
+.players-list {
+  background-color: var(--background-color);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
 }
 
-.phase-name.lobby {
-  background: rgba(52, 152, 219, 0.2);
-  color: #3498db;
+.players-list h3 {
+  margin-bottom: var(--spacing-md);
+  font-size: 1rem;
+  color: var(--text-secondary);
 }
 
-.phase-name.end {
-  background: rgba(231, 76, 60, 0.2);
-  color: #e74c3c;
-}
-
-.role-name.werewolf {
-  color: #e74c3c;
-  background: rgba(231, 76, 60, 0.1);
-}
-
-.role-name.villager {
-  color: #2ecc71;
-  background: rgba(46, 204, 113, 0.1);
-}
-
-.role-name.seer {
-  color: #9b59b6;
-  background: rgba(155, 89, 182, 0.1);
-}
-
-/* Phase UI */
-.phase-ui {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 8px;
-  padding: 1rem;
-  margin-bottom: 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.phase-ui h3 {
-  margin-top: 0;
-  margin-bottom: 0.5rem;
-  color: #fff;
-  font-size: 1.1rem;
-}
-
-.phase-ui p {
-  margin: 0 0 1rem 0;
-  font-size: 0.9rem;
-  color: rgba(255, 255, 255, 0.8);
-  line-height: 1.4;
-}
-
-/* Player selection */
-.player-selection {
+.players-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.5rem;
-  margin: 1rem 0;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--spacing-sm);
 }
 
-.player-button {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #fff;
-  padding: 0.5rem;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-size: 0.85rem;
-  text-align: center;
+.player-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  background-color: var(--surface-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.player-item.self {
+  border-color: var(--primary-color);
+  background-color: rgba(99, 102, 241, 0.1);
+}
+
+.player-item.eliminated {
+  opacity: 0.6;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.status-dot.alive {
+  background-color: var(--success-color);
+}
+
+.status-dot.dead {
+  background-color: var(--error-color);
+}
+
+.player-name {
+  flex: 1;
+  font-size: 0.875rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.player-button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  transform: translateY(-1px);
+.eliminated-tag {
+  font-size: 0.75rem;
+  color: var(--error-color);
 }
 
-.player-button:active:not(:disabled) {
-  transform: translateY(0);
+/* Debate Status */
+.debate-status {
+  background-color: var(--background-color);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
 }
 
-.player-button.selected {
-  background: #4a90e2;
-  border-color: #4a90e2;
-  color: white;
+.debate-info {
+  margin-bottom: var(--spacing-md);
+}
+
+.debate-info h3 {
+  font-size: 1rem;
+  margin-bottom: var(--spacing-xs);
+}
+
+.turn-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.progress-bar {
+  height: 4px;
+  background-color: var(--border-color);
+  border-radius: 2px;
+  overflow: hidden;
+  margin: var(--spacing-md) 0;
+}
+
+.progress-fill {
+  height: 100%;
+  background-color: var(--primary-color);
+  transition: width 0.3s ease;
+}
+
+.current-speaker {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: 0.875rem;
+}
+
+.speaker-label {
+  color: var(--text-secondary);
+}
+
+.speaker-name {
   font-weight: 500;
 }
 
-.player-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.speaker-name.you {
+  color: var(--primary-color);
 }
 
-/* Action buttons */
-.action-button {
-  background: #4a90e2;
-  color: white;
-  border: none;
-  padding: 0.6rem 1.2rem;
-  border-radius: 6px;
-  font-size: 0.9rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  width: 100%;
-  margin-top: 0.5rem;
+/* Voting Interface */
+.voting-interface {
+  background-color: var(--background-color);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
 }
 
-.action-button:hover:not(:disabled) {
-  background: #3a7bc8;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+.section-header {
+  margin-bottom: var(--spacing-md);
 }
 
-.action-button:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.action-button:disabled {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.5);
-  cursor: not-allowed;
-}
-
-/* Game log */
-.game-log {
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: 8px;
-  padding: 1rem;
-  margin-top: auto;
-  flex: 1;
-  min-height: 200px;
-  max-height: 300px;
-  overflow-y: auto;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.game-log h4 {
-  margin-top: 0;
-  margin-bottom: 0.5rem;
-  color: #fff;
+.section-header h3 {
   font-size: 1rem;
+  margin-bottom: var(--spacing-xs);
+}
+
+.section-header p {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.voting-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--spacing-sm);
+}
+
+.vote-button {
+  padding: var(--spacing-sm);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface-color);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.vote-button:hover {
+  border-color: var(--primary-color);
+  background-color: rgba(99, 102, 241, 0.1);
+}
+
+.vote-button.selected {
+  border-color: var(--primary-color);
+  background-color: rgba(99, 102, 241, 0.1);
+}
+
+.vote-confirmation {
+  padding: var(--spacing-md);
+  background-color: rgba(34, 197, 94, 0.1);
+  border-radius: var(--radius-md);
+}
+
+.vote-status {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  color: var(--success-color);
+}
+
+.check-icon {
+  font-size: 1.25rem;
+}
+
+/* Game Log */
+.game-log {
+  background-color: var(--background-color);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+}
+
+.game-log h3 {
+  font-size: 1rem;
+  margin-bottom: var(--spacing-md);
+  color: var(--text-secondary);
 }
 
 .log-entries {
-  font-size: 0.85rem;
-  line-height: 1.4;
-  color: rgba(255, 255, 255, 0.8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
 }
 
 .log-entry {
-  padding: 0.3rem 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding: var(--spacing-sm);
+  background-color: var(--surface-color);
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
 }
 
-.log-entry:last-child {
-  border-bottom: none;
+/* Phase Info */
+.phase-info {
+  background-color: var(--background-color);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
 }
 
-/* Player list */
-.player-list {
-  margin-top: 1rem;
+.phase-content {
+  text-align: center;
 }
 
-.player-list h4 {
-  margin: 0 0 0.5rem 0;
-  font-size: 0.9rem;
-  color: rgba(255, 255, 255, 0.8);
-}
-
-.player-list ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.player-list li {
-  padding: 0.3rem 0.5rem;
-  background: rgba(255, 255, 255, 0.05);
-  margin-bottom: 0.3rem;
-  border-radius: 4px;
-  font-size: 0.85rem;
-  display: flex;
-  align-items: center;
-}
-
-/* Target selection */
-.target-selection {
-  background: rgba(255, 152, 0, 0.1);
-  border: 1px solid rgba(255, 152, 0, 0.3);
-  border-radius: 8px;
-  padding: 1rem;
-  margin-bottom: 1rem;
-  animation: fadeIn 0.3s ease-in-out;
-}
-
-.target-selection h3 {
-  margin-top: 0;
-  margin-bottom: 1rem;
-  color: #ff9800;
+.phase-content h3 {
   font-size: 1rem;
-  text-align: center;
+  margin-bottom: var(--spacing-sm);
 }
 
-/* Speaking prompt */
-.speaking-prompt {
-  background: rgba(76, 175, 80, 0.15);
-  border: 2px solid #4caf50;
-  border-radius: 8px;
-  padding: 1rem;
-  margin-bottom: 1rem;
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  animation: pulse 2s infinite;
+.phase-content p {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
 }
 
-.pulse-animation {
-  width: 12px;
-  height: 12px;
-  background: #4caf50;
-  border-radius: 50%;
-  animation: pulse 1.5s infinite;
-}
-
-.speaking-message h3 {
-  margin: 0 0 0.5rem 0;
-  color: #4caf50;
-  font-size: 1.1rem;
-}
-
-.speaking-message p {
-  margin: 0;
-  color: rgba(255, 255, 255, 0.8);
-  font-size: 0.9rem;
-}
-
-/* Animations */
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes pulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.4);
-  }
-
-  70% {
-    box-shadow: 0 0 0 10px rgba(76, 175, 80, 0);
-  }
-
-  100% {
-    box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
-  }
-}
-
-/* Responsive adjustments */
-@media (max-width: 768px) {
-  .game-ui {
-    position: static;
-    width: 100%;
-    height: auto;
-    max-height: 50vh;
-    border-left: none;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-  }
-
-  .player-selection {
-    grid-template-columns: 1fr;
-  }
-
-  .game-log {
-    max-height: 200px;
-  }
-}
+.phase-content.waiting { color: var(--text-secondary); }
+.phase-content.day { color: var(--primary-color); }
+.phase-content.night { color: var(--text-secondary); }
 
 /* Scrollbar styling */
-.game-log::-webkit-scrollbar,
-.player-list ul::-webkit-scrollbar {
+.game-ui-content::-webkit-scrollbar {
   width: 6px;
 }
 
-.game-log::-webkit-scrollbar-track,
-.player-list ul::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.05);
+.game-ui-content::-webkit-scrollbar-track {
+  background: var(--background-color);
+}
+
+.game-ui-content::-webkit-scrollbar-thumb {
+  background: var(--border-color);
   border-radius: 3px;
 }
 
-.game-log::-webkit-scrollbar-thumb,
-.player-list ul::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 3px;
-}
-
-.game-log::-webkit-scrollbar-thumb:hover,
-.player-list ul::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
-}
-
-/* Player Grid Styles */
-.player-grid {
-  margin: 20px 0;
-}
-
-.grid-title {
-  text-align: center;
-  margin-bottom: 15px;
-  color: #333;
-  font-size: 1.1em;
-}
-
-.players-grid-container {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 10px;
-  max-width: 600px;
-  margin: 0 auto;
-}
-
-.player-grid-item {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 15px 10px;
-  border: 2px solid #ddd;
-  border-radius: 10px;
-  background: white;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  min-height: 100px;
-}
-
-.player-grid-item:hover:not(:disabled) {
-  border-color: #007bff;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-}
-
-.player-grid-item.selected {
-  border-color: #28a745;
-  background: #f8f9fa;
-  box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.3);
-}
-
-.player-grid-item.self {
-  border-color: #ffc107;
-  background: #fff3cd;
-}
-
-.player-grid-item.dead {
-  opacity: 0.6;
-  background: #f8f9fa;
-  border-color: #6c757d;
-}
-
-.player-grid-item:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.player-avatar {
-  font-size: 24px;
-  margin-bottom: 8px;
-}
-
-.player-info {
-  text-align: center;
-  flex-grow: 1;
-}
-
-.player-name {
-  font-weight: bold;
-  font-size: 0.9em;
-  color: #333;
-  margin-bottom: 4px;
-}
-
-.player-role {
-  font-size: 0.8em;
-  color: #666;
-  font-style: italic;
-}
-
-.player-status {
-  font-size: 0.7em;
-  color: #dc3545;
-  font-weight: bold;
-}
-
-.selection-indicator {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  background: #28a745;
-  color: white;
-  border-radius: 50%;
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: bold;
-}
-
-/* Debate Status Improvements */
-.debate-status {
-  background: #f8f9fa;
-  border: 1px solid #dee2e6;
-  border-radius: 8px;
-  padding: 15px;
-  margin: 15px 0;
-}
-
-.debate-header h3 {
-  margin: 0 0 10px 0;
-  color: #495057;
-}
-
-.turn-info {
-  margin-bottom: 10px;
-}
-
-.turn-counter {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.turn-number {
-  font-weight: bold;
-  color: #007bff;
-}
-
-.turns-remaining {
-  color: #6c757d;
-  font-size: 0.9em;
-}
-
-.progress-bar {
-  width: 100%;
-  height: 8px;
-  background: #e9ecef;
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #28a745, #ffc107, #dc3545);
-  transition: width 0.3s ease;
-}
-
-.current-speaker {
-  text-align: center;
-  padding: 8px;
-  border-radius: 6px;
-  margin-top: 10px;
-}
-
-.you-speaking {
-  background: #d4edda;
-  color: #155724;
-  font-weight: bold;
-}
-
-.other-speaking {
-  background: #e2e3e5;
-  color: #383d41;
-}
-
-/* Voting Interface */
-.voting-interface {
-  background: #fff;
-  border: 2px solid #007bff;
-  border-radius: 10px;
-  padding: 20px;
-  margin: 20px 0;
-}
-
-.voting-header {
-  text-align: center;
-  margin-bottom: 20px;
-}
-
-.voting-header h3 {
-  color: #007bff;
-  margin-bottom: 10px;
-}
-
-.vote-status {
-  background: #d4edda;
-  color: #155724;
-  padding: 10px;
-  border-radius: 6px;
-  margin-top: 10px;
-}
-
-.vote-actions, .target-actions {
-  display: flex;
-  gap: 10px;
-  justify-content: center;
-  margin-top: 20px;
-}
-
-.confirm-vote-button, .confirm-target-button {
-  background: #28a745;
-  color: white;
-  border: none;
-  padding: 12px 24px;
-  border-radius: 6px;
-  font-weight: bold;
-  cursor: pointer;
-  transition: background 0.3s ease;
-}
-
-.confirm-vote-button:hover, .confirm-target-button:hover {
-  background: #218838;
-}
-
-.cancel-vote-button, .cancel-target-button {
-  background: #6c757d;
-  color: white;
-  border: none;
-  padding: 12px 24px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.3s ease;
-}
-
-.cancel-vote-button:hover, .cancel-target-button:hover {
-  background: #5a6268;
-}
-
-/* Target Selection */
-.target-selection {
-  background: #fff3cd;
-  border: 2px solid #ffc107;
-  border-radius: 10px;
-  padding: 20px;
-  margin: 20px 0;
-}
-
-.target-header {
-  text-align: center;
-  margin-bottom: 20px;
-}
-
-.target-header h3 {
-  color: #856404;
-  margin: 0;
-}
-
-/* Voting Results */
-.voting-results {
-  background: #f8f9fa;
-  border: 1px solid #dee2e6;
-  border-radius: 8px;
-  padding: 15px;
-  margin: 15px 0;
-}
-
-.vote-counts {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.vote-count {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 12px;
-  background: white;
-  border-radius: 6px;
-  border-left: 4px solid #007bff;
-}
-
-.vote-result {
-  text-align: center;
-  margin-top: 15px;
-  padding: 10px;
-  background: #d1ecf1;
-  border-radius: 6px;
-  color: #0c5460;
-}
-
-/* Speaking Prompt */
-.speaking-prompt {
-  position: relative;
-  background: linear-gradient(135deg, #28a745, #20c997);
-  color: white;
-  border-radius: 10px;
-  padding: 20px;
-  margin: 20px 0;
-  text-align: center;
-  overflow: hidden;
-}
-
-.pulse-animation {
-  position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  background: radial-gradient(circle, rgba(255,255,255,0.3) 0%, transparent 70%);
-  animation: pulse 2s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { transform: scale(0.8); opacity: 0.5; }
-  50% { transform: scale(1.2); opacity: 0.8; }
-}
-
-.speaking-message {
-  position: relative;
-  z-index: 1;
-}
-
-.speaking-message h3 {
-  margin: 0 0 10px 0;
-  font-size: 1.3em;
-}
-
-.speaking-message p {
-  margin: 0 0 8px 0;
-  font-size: 1.1em;
-}
-
-.speaking-message small {
-  opacity: 0.9;
-  font-size: 0.9em;
-}
-
-/* Phase UI */
-.lobby-players {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px;
-  margin-top: 15px;
-}
-
-.lobby-player {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px;
-  background: #f8f9fa;
-  border-radius: 6px;
-  border-left: 3px solid #007bff;
-}
-
-.host-indicator {
-  font-size: 1.2em;
-}
-
-.final-players {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 10px;
-  margin-top: 15px;
-}
-
-.final-player {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px;
-  background: #f8f9fa;
-  border-radius: 6px;
-}
-
-.death-indicator {
-  font-size: 1.2em;
-}
-
-/* Responsive Design */
-@media (max-width: 768px) {
-  .players-grid-container {
-    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-    gap: 8px;
-  }
-  
-  .player-grid-item {
-    padding: 10px 8px;
-    min-height: 80px;
-  }
-  
-  .player-avatar {
-    font-size: 20px;
-  }
-  
-  .player-name {
-    font-size: 0.8em;
-  }
-  
-  .vote-actions, .target-actions {
-    flex-direction: column;
-    align-items: center;
-  }
-  
-  .confirm-vote-button, .confirm-target-button,
-  .cancel-vote-button, .cancel-target-button {
-    width: 100%;
-    max-width: 250px;
-  }
-}
-
-/* Scrollbar styling */
-.game-log::-webkit-scrollbar,
-.player-list ul::-webkit-scrollbar {
-  width: 6px;
-}
-
-.game-log::-webkit-scrollbar-track,
-.player-list ul::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 3px;
-}
-
-.game-log::-webkit-scrollbar-thumb,
-.player-list ul::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 3px;
-}
-
-.game-log::-webkit-scrollbar-thumb:hover,
-.player-list ul::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
-}
-
-/* Player Grid Styles */
-.player-grid {
-  margin: 20px 0;
-}
-
-.grid-title {
-  text-align: center;
-  margin-bottom: 15px;
-  color: #333;
-  font-size: 1.1em;
-}
-
-.players-grid-container {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 10px;
-  max-width: 600px;
-  margin: 0 auto;
-}
-
-.player-grid-item {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 15px 10px;
-  border: 2px solid #ddd;
-  border-radius: 10px;
-  background: white;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  min-height: 100px;
-}
-
-.player-grid-item:hover:not(:disabled) {
-  border-color: #007bff;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-}
-
-.player-grid-item.selected {
-  border-color: #28a745;
-  background: #f8f9fa;
-  box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.3);
-}
-
-.player-grid-item.self {
-  border-color: #ffc107;
-  background: #fff3cd;
-}
-
-.player-grid-item.dead {
-  opacity: 0.6;
-  background: #f8f9fa;
-  border-color: #6c757d;
-}
-
-.player-grid-item:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.player-avatar {
-  font-size: 24px;
-  margin-bottom: 8px;
-}
-
-.player-info {
-  text-align: center;
-  flex-grow: 1;
-}
-
-.player-name {
-  font-weight: bold;
-  font-size: 0.9em;
-  color: #333;
-  margin-bottom: 4px;
-}
-
-.player-role {
-  font-size: 0.8em;
-  color: #666;
-  font-style: italic;
-}
-
-.player-status {
-  font-size: 0.7em;
-  color: #dc3545;
-  font-weight: bold;
-}
-
-.selection-indicator {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  background: #28a745;
-  color: white;
-  border-radius: 50%;
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: bold;
-}
-
-/* Debate Status Improvements */
-.debate-status {
-  background: #f8f9fa;
-  border: 1px solid #dee2e6;
-  border-radius: 8px;
-  padding: 15px;
-  margin: 15px 0;
-}
-
-.debate-header h3 {
-  margin: 0 0 10px 0;
-  color: #495057;
-}
-
-.turn-info {
-  margin-bottom: 10px;
-}
-
-.turn-counter {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.turn-number {
-  font-weight: bold;
-  color: #007bff;
-}
-
-.turns-remaining {
-  color: #6c757d;
-  font-size: 0.9em;
-}
-
-.progress-bar {
-  width: 100%;
-  height: 8px;
-  background: #e9ecef;
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #28a745, #ffc107, #dc3545);
-  transition: width 0.3s ease;
-}
-
-.current-speaker {
-  text-align: center;
-  padding: 8px;
-  border-radius: 6px;
-  margin-top: 10px;
-}
-
-.you-speaking {
-  background: #d4edda;
-  color: #155724;
-  font-weight: bold;
-}
-
-.other-speaking {
-  background: #e2e3e5;
-  color: #383d41;
-}
-
-/* Voting Interface */
-.voting-interface {
-  background: #fff;
-  border: 2px solid #007bff;
-  border-radius: 10px;
-  padding: 20px;
-  margin: 20px 0;
-}
-
-.voting-header {
-  text-align: center;
-  margin-bottom: 20px;
-}
-
-.voting-header h3 {
-  color: #007bff;
-  margin-bottom: 10px;
-}
-
-.vote-status {
-  background: #d4edda;
-  color: #155724;
-  padding: 10px;
-  border-radius: 6px;
-  margin-top: 10px;
-}
-
-.vote-actions, .target-actions {
-  display: flex;
-  gap: 10px;
-  justify-content: center;
-  margin-top: 20px;
-}
-
-.confirm-vote-button, .confirm-target-button {
-  background: #28a745;
-  color: white;
-  border: none;
-  padding: 12px 24px;
-  border-radius: 6px;
-  font-weight: bold;
-  cursor: pointer;
-  transition: background 0.3s ease;
-}
-
-.confirm-vote-button:hover, .confirm-target-button:hover {
-  background: #218838;
-}
-
-.cancel-vote-button, .cancel-target-button {
-  background: #6c757d;
-  color: white;
-  border: none;
-  padding: 12px 24px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.3s ease;
-}
-
-.cancel-vote-button:hover, .cancel-target-button:hover {
-  background: #5a6268;
-}
-
-/* Target Selection */
-.target-selection {
-  background: #fff3cd;
-  border: 2px solid #ffc107;
-  border-radius: 10px;
-  padding: 20px;
-  margin: 20px 0;
-}
-
-.target-header {
-  text-align: center;
-  margin-bottom: 20px;
-}
-
-.target-header h3 {
-  color: #856404;
-  margin: 0;
-}
-
-/* Voting Results */
-.voting-results {
-  background: #f8f9fa;
-  border: 1px solid #dee2e6;
-  border-radius: 8px;
-  padding: 15px;
-  margin: 15px 0;
-}
-
-.vote-counts {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.vote-count {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 12px;
-  background: white;
-  border-radius: 6px;
-  border-left: 4px solid #007bff;
-}
-
-.vote-result {
-  text-align: center;
-  margin-top: 15px;
-  padding: 10px;
-  background: #d1ecf1;
-  border-radius: 6px;
-  color: #0c5460;
-}
-
-/* Speaking Prompt */
-.speaking-prompt {
-  position: relative;
-  background: linear-gradient(135deg, #28a745, #20c997);
-  color: white;
-  border-radius: 10px;
-  padding: 20px;
-  margin: 20px 0;
-  text-align: center;
-  overflow: hidden;
-}
-
-.pulse-animation {
-  position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  background: radial-gradient(circle, rgba(255,255,255,0.3) 0%, transparent 70%);
-  animation: pulse 2s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { transform: scale(0.8); opacity: 0.5; }
-  50% { transform: scale(1.2); opacity: 0.8; }
-}
-
-.speaking-message {
-  position: relative;
-  z-index: 1;
-}
-
-.speaking-message h3 {
-  margin: 0 0 10px 0;
-  font-size: 1.3em;
-}
-
-.speaking-message p {
-  margin: 0 0 8px 0;
-  font-size: 1.1em;
-}
-
-.speaking-message small {
-  opacity: 0.9;
-  font-size: 0.9em;
-}
-
-/* Phase UI */
-.lobby-players {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px;
-  margin-top: 15px;
-}
-
-.lobby-player {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px;
-  background: #f8f9fa;
-  border-radius: 6px;
-  border-left: 3px solid #007bff;
-}
-
-.host-indicator {
-  font-size: 1.2em;
-}
-
-.final-players {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 10px;
-  margin-top: 15px;
-}
-
-.final-player {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px;
-  background: #f8f9fa;
-  border-radius: 6px;
-}
-
-.death-indicator {
-  font-size: 1.2em;
-}
-
-/* Responsive Design */
-@media (max-width: 768px) {
-  .players-grid-container {
-    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-    gap: 8px;
-  }
-  
-  .player-grid-item {
-    padding: 10px 8px;
-    min-height: 80px;
-  }
-  
-  .player-avatar {
-    font-size: 20px;
-  }
-  
-  .player-name {
-    font-size: 0.8em;
-  }
-  
-  .vote-actions, .target-actions {
-    flex-direction: column;
-    align-items: center;
-  }
-  
-  .confirm-vote-button, .confirm-target-button,
-  .cancel-vote-button, .cancel-target-button {
-    width: 100%;
-    max-width: 250px;
-  }
+.game-ui-content::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
 }

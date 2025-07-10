@@ -18,12 +18,10 @@ import '../styles/GameRoom.css';
  * @param {GameRoomProps} props - Component props
  */
 export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
-  // ----- Local UI state -----
+  // State management
   const [participants, setParticipants] = useState([]);
   const [participantTracks, setParticipantTracks] = useState(new Map());
   const [isMuted, setIsMuted] = useState(false);
-
-  // Game state
   const [gameState, setGameState] = useState({
     phase: 'lobby',
     round: 0,
@@ -421,46 +419,57 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
 
   if (!room) {
     return (
-      <div className="game-room loading">
-        <div className="loading-message">Connecting to room...</div>
+      <div className="game-room-loading">
+        <div className="loading-spinner"></div>
+        <p>Connecting to room...</p>
       </div>
     );
   }
 
   return (
     <div className="game-room">
-      <div className="game-header">
-        <h2>Room: {roomName}</h2>
-        <div className="player-info">
-          {playerName} ({gameState.currentPlayer.role})
-          <span className={`connection-status ${room.state === 'connected' ? 'connected' : 'disconnected'}`}>
-            {room.state === 'connected' ? '●' : '○'}
-          </span>
+      <header className="game-header">
+        <div className="header-content">
+          <div className="room-info">
+            <h2>{roomName}</h2>
+            <div className="connection-status">
+              <span className={`status-indicator ${room.state === 'connected' ? 'connected' : 'disconnected'}`}></span>
+              <span className="status-text">{room.state === 'connected' ? 'Connected' : 'Disconnected'}</span>
+            </div>
+          </div>
+          <div className="player-info">
+            <span className="player-name">{playerName}</span>
+            {gameState.currentPlayer.role && (
+              <span className="player-role">{gameState.currentPlayer.role}</span>
+            )}
+          </div>
         </div>
-      </div>
+      </header>
 
-      <div className="game-content">
-        <div className="participants-grid">
-          {participants.map((participant) => {
-            const tracks = Array.from(participantTracks.get(participant.identity) || []);
-            const playerState = gameState.players.find(p => p.id === participant.identity || p.name === participant.identity);
-            const isCurrentSpeaker = gameState.debate.current_speaker === participant.identity;
-            
-            return (
-              <Participant
-                key={participant.identity}
-                audioTracks={tracks}
-                participant={participant}
-                isLocal={participant.identity === playerName}
-                isSpeaking={isCurrentSpeaker}
-                role={playerState?.role || 'villager'}
-                isAlive={playerState?.isAlive !== false}
-              />
-            );
-          })}
-        </div>
+      <main className="game-content">
+        <section className="participants-section">
+          <div className="participants-grid">
+            {participants.map((participant) => {
+              const tracks = Array.from(participantTracks.get(participant.identity) || []);
+              const playerState = gameState.players.find(p => p.id === participant.identity || p.name === participant.identity);
+              const isCurrentSpeaker = gameState.debate.current_speaker === participant.identity;
+              
+              return (
+                <Participant
+                  key={participant.identity}
+                  audioTracks={tracks}
+                  participant={participant}
+                  isLocal={participant.identity === playerName}
+                  isSpeaking={isCurrentSpeaker}
+                  role={playerState?.role || 'villager'}
+                  isAlive={playerState?.isAlive !== false}
+                />
+              );
+            })}
+          </div>
+        </section>
 
-        <div className="game-ui-container">
+        <section className="game-interface">
           <GameUI
             gameState={gameState}
             onVote={handleVote}
@@ -468,25 +477,27 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
             playerName={playerName}
             sendMessage={sendMessage}
           />
-        </div>
-      </div>
+        </section>
+      </main>
 
-      <AudioControls
-        isMuted={isMuted}
-        onToggleMute={toggleMute}
-        onDisconnect={() => room.disconnect()}
-      />
+      <footer className="game-footer">
+        <AudioControls
+          isMuted={isMuted}
+          onToggleMute={toggleMute}
+          onDisconnect={() => room.disconnect()}
+        />
 
-      {gameState.announcements?.length > 0 && (
-        <div className="announcements">
-          {gameState.announcements.slice(-3).map(announcement => (
-            <div key={announcement.id} className="announcement">
-              <span className="announcement-time">{announcement.timestamp}</span>
-              <span className="announcement-text">{announcement.message}</span>
-            </div>
-          ))}
-        </div>
-      )}
+        {gameState.announcements?.length > 0 && (
+          <div className="announcements">
+            {gameState.announcements.slice(-3).map(announcement => (
+              <div key={announcement.id} className="announcement">
+                <span className="announcement-time">{announcement.timestamp}</span>
+                <span className="announcement-text">{announcement.message}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </footer>
     </div>
   );
 };
