@@ -117,129 +117,192 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
     });
   }, []);
 
-  const updateBasedOnType = (message) => {
-    switch (message.update_type) {
-      case 'day_phase_start':
-        setGameState(prev => ({
-          ...prev,
-          phase: 'day',
-          round: message.data?.round || prev.round,
-          debate: {
-            ...prev.debate,
-            current_speaker: null,
-            current_turn: 0,
-            history: []
-          },
-          voting: {
-            ...prev.voting,
-            active: false,
-            voted_player: null,
-            votes: {}
-          },
-          interaction: {
-            ...prev.interaction,
-            can_speak: false
-          }
-        }));
-        break;
+  // Simplified message handler
+  const handleMessage = useCallback((message) => {
+    console.log('Received message:', message);
 
-      case 'night_phase_start':
+    switch (message.type) {
+      case 'game_event':
+        handleGameEvent(message);
+        break;
+      
+      case 'user_action':
+        handleUserAction(message);
+        break;
+      
+      case 'announcement':
+        handleAnnouncement(message);
+        break;
+      
+      default:
+        console.warn('Unknown message type:', message.type);
+    }
+  }, []);
+
+  const handleGameEvent = useCallback((message) => {
+    const { event, data, game_state } = message;
+
+    // Update game state if provided
+    if (game_state) {
+      handleGameStateUpdate(game_state);
+    }
+
+    switch (event) {
+      case 'phase_change':
         setGameState(prev => ({
           ...prev,
-          phase: 'night',
-          round: message.data?.round || prev.round,
-          interaction: {
-            ...prev.interaction,
-            can_speak: false
-          }
+          phase: data.phase,
+          round: data.round || prev.round,
+          // Reset relevant state for new phase
+          ...(data.phase === 'day' && {
+            debate: { ...prev.debate, current_speaker: null, current_turn: 0, history: [] },
+            voting: { ...prev.voting, active: false, voted_player: null, votes: {} },
+            interaction: { ...prev.interaction, can_speak: false }
+          }),
+          ...(data.phase === 'night' && {
+            interaction: { ...prev.interaction, can_speak: false }
+          }),
+          ...(data.phase === 'voting' && {
+            voting: { ...prev.voting, active: true, voted_player: null, votes: {} },
+            interaction: { ...prev.interaction, can_speak: false }
+          })
         }));
         break;
 
       case 'debate_update':
-        const { speaker, dialogue, turn } = message.data || {};
-        setGameState(prev => ({
-          ...prev,
-          phase: 'day',
-          debate: {
-            ...prev.debate,
-            current_speaker: speaker,
-            current_turn: turn || prev.debate.current_turn + 1,
-            history: [...prev.debate.history, { speaker, dialogue, turn }],
-            turns_left: Math.max(0, prev.debate.max_turns - (turn || prev.debate.current_turn + 1))
-          }
-        }));
+        if (data.speaker && data.dialogue !== undefined) {
+          setGameState(prev => ({
+            ...prev,
+            phase: 'day',
+            debate: {
+              ...prev.debate,
+              current_speaker: data.speaker,
+              current_turn: data.turn || prev.debate.current_turn + 1,
+              history: [...prev.debate.history, { speaker: data.speaker, dialogue: data.dialogue, turn: data.turn }],
+              turns_left: Math.max(0, prev.debate.max_turns - (data.turn || prev.debate.current_turn + 1))
+            }
+          }));
+        }
+        if (data.speaking_ended) {
+          setGameState(prev => ({
+            ...prev,
+            interaction: { ...prev.interaction, can_speak: false, speaking_prompt: '' }
+          }));
+        }
         break;
 
-      case 'voting_phase':
+      case 'voting_update':
+        switch (data.event) {
+          case 'voting_started':
+            setGameState(prev => ({
+              ...prev,
+              voting: { ...prev.voting, active: true, votes: {}, voted_player: null }
+            }));
+            break;
+          case 'vote_received':
+            setGameState(prev => ({
+              ...prev,
+              voting: { ...prev.voting, votes: { ...prev.voting.votes, [data.voter]: data.target } }
+            }));
+            break;
+          case 'voting_ended':
+            setGameState(prev => ({
+              ...prev,
+              voting: { ...prev.voting, active: false, results: data.votes || prev.voting.votes }
+            }));
+            break;
+          case 'voting_results':
+            setGameState(prev => ({
+              ...prev,
+              voting: { ...prev.voting, results: data.results }
+            }));
+            break;
+        }
+        break;
+
+      case 'player_update':
+        if (data.exiled_player) {
+          setGameState(prev => ({
+            ...prev,
+            players: prev.players.map(p => 
+              p.id === data.exiled_player || p.name === data.exiled_player 
+                ? { ...p, isAlive: false } 
+                : p
+            )
+          }));
+        }
+        break;
+
+      default:
+        console.log('Unhandled game event:', event, data);
+    }
+  }, [handleGameStateUpdate]);
+
+  const handleUserAction = useCallback((message) => {
+    const { action, data, timeout } = message;
+
+    switch (action) {
+      case 'can_speak':
+        // Clear any existing timeout
+        if (speakTimeoutRef.current) {
+          clearTimeout(speakTimeoutRef.current);
+        }
+        
         setGameState(prev => ({
           ...prev,
-          phase: 'voting',
           interaction: {
             ...prev.interaction,
-            can_speak: false
+            can_speak: true,
+            speaking_prompt: data.prompt || 'You can speak now!'
           }
+        }));
+
+        // Set timeout to disable speaking
+        if (timeout) {
+          speakTimeoutRef.current = setTimeout(() => {
+            setGameState(prev => ({
+              ...prev,
+              interaction: { ...prev.interaction, can_speak: false, speaking_prompt: '' }
+            }));
+          }, timeout * 1000);
+        }
+        break;
+
+      case 'request_vote':
+        setGameState(prev => ({
+          ...prev,
+          voting: { ...prev.voting, active: true, voted_player: null }
         }));
         break;
 
-      case 'voting_started':
+      case 'request_target':
         setGameState(prev => ({
           ...prev,
-          voting: {
-            ...prev.voting,
+          targetSelection: {
             active: true,
-            votes: {},
-            voted_player: null
+            action: data.action,
+            options: data.options,
+            prompt: data.prompt,
+            icon: data.icon
           }
         }));
         break;
 
-      case 'vote_received':
-        const { voter, target } = message.data || {};
-        setGameState(prev => ({
-          ...prev,
-          voting: {
-            ...prev.voting,
-            votes: { ...prev.voting.votes, [voter]: target }
-          }
-        }));
-        break;
-
-      case 'voting_ended':
-        setGameState(prev => ({
-          ...prev,
-          voting: {
-            ...prev.voting,
-            active: false,
-            results: message.data?.votes || prev.voting.votes
-          }
-        }));
-        break;
-
-      case 'voting_results':
-        setGameState(prev => ({
-          ...prev,
-          voting: {
-            ...prev.voting,
-            results: message.data?.results
-          }
-        }));
-        break;
-
-      case 'player_exiled':
-        const exiledPlayer = message.data?.player;
-        setGameState(prev => ({
-          ...prev,
-          players: prev.players.map(p => 
-            p.id === exiledPlayer || p.name === exiledPlayer 
-              ? { ...p, isAlive: false } 
-              : p
-          )
-        }));
-        break;
       default:
-        break;
+        console.log('Unhandled user action:', action, data);
     }
-  }
+  }, []);
+
+  const handleAnnouncement = useCallback((message) => {
+    setGameState(prev => ({
+      ...prev,
+      announcements: [...prev.announcements, { 
+        id: message.timestamp || Date.now(), 
+        message: message.text,
+        timestamp: new Date(message.timestamp).toLocaleTimeString()
+      }]
+    }));
+  }, []);
 
   useEffect(() => {
     if (!room) return;
@@ -288,103 +351,7 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
       if (!isMounted.current) return;
       try {
         const message = JSON.parse(new TextDecoder().decode(payload));
-        console.log('Parsed message:', message);
-
-        switch (message.type) {
-          case 'game_state_update':
-            if (message.game_state) {
-              handleGameStateUpdate(message.game_state);
-            }
-            updateBasedOnType(message);
-
-            break;
-
-          case 'can_speak':
-            const timeout = message.data?.timeout || 5;
-            const prompt = message.data?.prompt || 'You can speak now!';
-            
-            // Clear any existing timeout
-            if (speakTimeoutRef.current) {
-              clearTimeout(speakTimeoutRef.current);
-            }
-            
-            setGameState(prev => ({
-              ...prev,
-              interaction: {
-                ...prev.interaction,
-                can_speak: true,
-                speaking_prompt: prompt
-              }
-            }));
-
-            // Set timeout to disable speaking
-            speakTimeoutRef.current = setTimeout(() => {
-              setGameState(prev => ({
-                ...prev,
-                interaction: {
-                  ...prev.interaction,
-                  can_speak: false,
-                  speaking_prompt: ''
-                }
-              }));
-            }, timeout * 1000);
-            break;
-
-          case 'speaking_ended':
-          case 'debate_turn':
-            setGameState(prev => ({
-              ...prev,
-              interaction: {
-                ...prev.interaction,
-                can_speak: message.type === 'debate_turn',
-                speaking_prompt: message.type === 'debate_turn' 
-                  ? "It's your turn to speak!" 
-                  : ''
-              }
-            }));
-            break;
-
-          case 'request_vote':
-            setGameState(prev => ({
-              ...prev,
-              voting: {
-                ...prev.voting,
-                active: true,
-                voted_player: null
-              }
-            }));
-            break;
-
-          case 'announcement':
-            if (message.data?.text) {
-              setGameState(prev => ({
-                ...prev,
-                announcements: [...prev.announcements, { 
-                  id: Date.now(), 
-                  message: message.data.text,
-                  timestamp: new Date().toLocaleTimeString()
-                }],
-              }));
-            }
-            break;
-
-          case 'request_target_selection':
-            if (message.data) {
-              setGameState(prev => ({
-                ...prev,
-                targetSelection: {
-                  active: true,
-                  action: message.data.action,
-                  options: message.data.options,
-                  prompt: message.data.prompt,
-                },
-              }));
-            }
-            break;
-
-          default:
-            console.warn('Unknown message type:', message.type);
-        }
+        handleMessage(message);
       } catch (error) {
         console.error('Failed to parse data message:', error);
       }
@@ -407,7 +374,7 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
         .off(RoomEvent.TrackUnsubscribed, onTrackUnsubscribed)
         .off(RoomEvent.DataReceived, onDataReceived);
     };
-  }, [room, handleGameStateUpdate]);
+  }, [room, handleMessage]);
 
   const toggleMute = useCallback(async () => {
     if (!room) return;

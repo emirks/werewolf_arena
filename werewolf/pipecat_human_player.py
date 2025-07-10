@@ -26,6 +26,14 @@ from werewolf.frame_processors import (
     SpeechDetectionProcessor,
 )
 
+from .messaging import (
+    create_game_event_message,
+    create_user_action_message,
+    create_announcement_message,
+    GameEventType,
+    UserActionType
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -254,21 +262,17 @@ class PipecatHumanPlayer(Deserializable):
         """Handle generic game actions."""
         logger.info(f"Game action received: {action_type}, data: {data}")
 
-    async def send_data_message(self, message_type: str, data: Dict[str, Any] = None):
+    async def send_data_message(self, message: Dict[str, Any]):
         """Send a message through the data channel."""
         if not self._connected or not self._transport:
             logger.warning("Not connected to LiveKit, cannot send data message")
             return
 
-        message = {"type": message_type, "player": self.name}
-        if data:
-            message.update(data)
-
         try:
             await self._transport.send_message(
                 json.dumps(message), participant_id=self.name
             )
-            # logger.info(f"Sent data message: {message}")
+            logger.info(f"Sent message: {message['type']}")
         except Exception as e:
             logger.error(f"Error sending data message: {e}")
 
@@ -399,14 +403,16 @@ class PipecatHumanPlayer(Deserializable):
             vote = self._current_vote
             logger.info(f"Using existing vote: {vote}")
         else:
-            # Ask for vote
-            await self.send_data_message(
-                "request_vote",
+            # Request vote from user
+            message = create_user_action_message(
+                UserActionType.REQUEST_VOTE,
                 {
                     "options": options,
                     "prompt": f"Round {self.gamestate.round_number} - Vote to eliminate a player",
                 },
+                timeout=60
             )
+            await self.send_data_message(message)
 
             # Wait for vote response
             vote = await self.wait_for_response("vote", timeout=60.0)
@@ -415,7 +421,7 @@ class PipecatHumanPlayer(Deserializable):
                 vote = options[0] if options else None
                 logger.warning(f"No valid vote received, defaulting to: {vote}")
 
-        if len(self.gamestate.debate) == MAX_DEBATE_TURNS:
+        if len(self.gamestate.debate) >= MAX_DEBATE_TURNS:
             self._add_observation(
                 f"After the debate, I voted to remove {vote} from the game."
             )
@@ -429,11 +435,7 @@ class PipecatHumanPlayer(Deserializable):
         return vote, log
 
     async def bid(self) -> Tuple[float, LmLog]:
-        """Bid to speak during the debate phase.
-
-        Returns:
-            Tuple containing the bid amount (0-1) and a log entry
-        """
+        """Bid to speak during the debate phase."""
         logger.info(f"Requesting bid from {self.name}")
 
         # Reset speech detection state
@@ -448,33 +450,28 @@ class PipecatHumanPlayer(Deserializable):
                 self._speech_detected = True
                 speech_detected_event.set()
 
-        # Store the original callback
+        # Store and update callback
         original_callback = getattr(
             self.transcription_processor, "_update_speech_detected_cb", None
         )
-
-        # Update the callback
         self.transcription_processor._update_speech_detected_cb = on_speech_detected
 
-        # Wait for either speech detection or timeout
         try:
-            # Send message that user can speak
-            await self.send_data_message(
-                "can_speak",
+            # Send speaking opportunity message
+            message = create_user_action_message(
+                UserActionType.CAN_SPEAK,
                 {
-                    "prompt": "You can speak now if you want to join the debate (you have 5 seconds)",
-                    "timeout": 5,
+                    "prompt": "You can speak now if you want to join the debate",
+                    "duration": "You have 5 seconds"
                 },
+                timeout=5
             )
+            await self.send_data_message(message)
 
             logger.info(f"Waiting for speech from {self.name}...")
 
             try:
-                await asyncio.wait_for(
-                    speech_detected_event.wait(),
-                    timeout=5.0,  # 5 second timeout for speaking
-                )
-
+                await asyncio.wait_for(speech_detected_event.wait(), timeout=5.0)
                 logger.info(f"Player {self.name} detected speech, bidding to speak")
                 return 1.0, LmLog(
                     prompt="SPEECH_DETECTED",
@@ -503,35 +500,37 @@ class PipecatHumanPlayer(Deserializable):
             )
 
         finally:
-            # Restore the original callback
+            # Restore callback
             if hasattr(self, "transcription_processor"):
-                self.transcription_processor._update_speech_detected_cb = (
-                    original_callback
-                )
+                self.transcription_processor._update_speech_detected_cb = original_callback
 
-            # Ensure speaking prompt is cleared
+            # Send speaking ended message
             try:
-                await self.send_data_message(
-                    "speaking_ended", {"message": "Speaking time is over"}
+                message = create_game_event_message(
+                    GameEventType.DEBATE_UPDATE,
+                    {"speaking_ended": True}
                 )
+                await self.send_data_message(message)
             except Exception as e:
                 logger.warning(f"Error sending speaking_ended message: {e}")
 
     async def debate(self) -> Tuple[Optional[str], LmLog]:
         """Wait for user to stop speaking and get transcription."""
         try:
-            await self.send_data_message(
-                "debate_turn",
+            message = create_user_action_message(
+                UserActionType.CAN_SPEAK,
                 {
-                    "prompt": "It's your turn to speak. Continue speaking and we'll get your message when you're done."
-                },
+                    "prompt": "It's your turn to speak",
+                    "instructions": "Continue speaking and we'll capture your message when you're done"
+                }
             )
+            await self.send_data_message(message)
 
-            # Wait for user to stop speaking (since they should already be speaking after bid)
+            # Wait for user to stop speaking
             while self._user_speaking:
                 await asyncio.sleep(0.1)
 
-            # Wait a bit more to ensure we get the final transcription
+            # Wait for final transcription
             await asyncio.sleep(1.0)
 
             speech = self._last_transcription or ""
@@ -563,9 +562,7 @@ class PipecatHumanPlayer(Deserializable):
     async def eliminate(self) -> Tuple[Optional[str], LmLog]:
         """Werewolf chooses a player to eliminate."""
         if not self.gamestate:
-            raise ValueError(
-                "GameView not initialized. Call initialize_game_view() first."
-            )
+            raise ValueError("GameView not initialized. Call initialize_game_view() first.")
 
         options = [
             player
@@ -573,22 +570,23 @@ class PipecatHumanPlayer(Deserializable):
             if player != self.name and player != self.gamestate.other_wolf
         ]
 
-        await self.send_data_message(
-            "request_target_selection",
+        message = create_user_action_message(
+            UserActionType.REQUEST_TARGET,
             {
                 "action": "eliminate",
                 "options": options,
                 "prompt": "Choose a player to eliminate tonight",
+                "icon": "🔪"
             },
+            timeout=60
         )
+        await self.send_data_message(message)
 
         target = await self.wait_for_response("target_selection", timeout=60.0)
 
         if not target or target not in options:
             target = options[0] if options else None
-            logger.warning(
-                f"No valid elimination target received, defaulting to: {target}"
-            )
+            logger.warning(f"No valid elimination target received, defaulting to: {target}")
 
         log = LmLog(
             prompt=f"USER_ELIMINATE: Choose elimination target",
@@ -601,30 +599,29 @@ class PipecatHumanPlayer(Deserializable):
     async def unmask(self) -> Tuple[Optional[str], LmLog]:
         """Seer chooses a player to investigate."""
         if not self.gamestate:
-            raise ValueError(
-                "GameView not initialized. Call initialize_game_view() first."
-            )
+            raise ValueError("GameView not initialized. Call initialize_game_view() first.")
 
         options = [
             player for player in self.gamestate.current_players if player != self.name
         ]
 
-        await self.send_data_message(
-            "request_target_selection",
+        message = create_user_action_message(
+            UserActionType.REQUEST_TARGET,
             {
                 "action": "investigate",
                 "options": options,
                 "prompt": "Choose a player to investigate tonight",
+                "icon": "🔍"
             },
+            timeout=60
         )
+        await self.send_data_message(message)
 
         target = await self.wait_for_response("target_selection", timeout=60.0)
 
         if not target or target not in options:
             target = options[0] if options else None
-            logger.warning(
-                f"No valid investigation target received, defaulting to: {target}"
-            )
+            logger.warning(f"No valid investigation target received, defaulting to: {target}")
 
         log = LmLog(
             prompt=f"USER_INVESTIGATE: Choose investigation target",
@@ -637,28 +634,27 @@ class PipecatHumanPlayer(Deserializable):
     async def save(self) -> Tuple[Optional[str], LmLog]:
         """Doctor chooses a player to protect."""
         if not self.gamestate:
-            raise ValueError(
-                "GameView not initialized. Call initialize_game_view() first."
-            )
+            raise ValueError("GameView not initialized. Call initialize_game_view() first.")
 
         options = list(self.gamestate.current_players)
 
-        await self.send_data_message(
-            "request_target_selection",
+        message = create_user_action_message(
+            UserActionType.REQUEST_TARGET,
             {
                 "action": "protect",
                 "options": options,
                 "prompt": "Choose a player to protect tonight",
+                "icon": "🛡️"
             },
+            timeout=60
         )
+        await self.send_data_message(message)
 
         target = await self.wait_for_response("target_selection", timeout=60.0)
 
         if not target or target not in options:
             target = options[0] if options else None
-            logger.warning(
-                f"No valid protection target received, defaulting to: {target}"
-            )
+            logger.warning(f"No valid protection target received, defaulting to: {target}")
 
         if target:
             self._add_observation(f"During the night, I chose to protect {target}")
@@ -671,26 +667,41 @@ class PipecatHumanPlayer(Deserializable):
 
         return target, log
 
-    async def send_game_state_update(
-        self, update_type: str, data: Dict[str, Any] = None
-    ):
+    async def send_game_state_update(self, event_type: str, data: Dict[str, Any] = None):
         """Send game state update through LiveKit data channel."""
         game_state = self._get_game_state()
 
-        update_data = {"update_type": update_type, "game_state": game_state}
+        if event_type in ["day_phase_start", "night_phase_start", "voting_phase"]:
+            message = create_game_event_message(
+                GameEventType.PHASE_CHANGE,
+                {"phase": event_type.replace("_phase_start", "").replace("_phase", ""), **(data or {})},
+                game_state
+            )
+        elif event_type == "debate_update":
+            message = create_game_event_message(
+                GameEventType.DEBATE_UPDATE,
+                data or {},
+                game_state
+            )
+        elif "voting" in event_type:
+            message = create_game_event_message(
+                GameEventType.VOTING_UPDATE,
+                {**{"event": event_type}, **(data or {})},
+                game_state
+            )
+        else:
+            message = create_game_event_message(
+                GameEventType.GAME_STATE,
+                {**{"event": event_type}, **(data or {})},
+                game_state
+            )
 
-        if data:
-            update_data["data"] = data
-
-        await self.send_data_message("game_state_update", update_data)
-        logger.info(f"Sent game state update: {update_data}")
+        await self.send_data_message(message)
 
     async def broadcast_announcement(self, announcement: str):
         """Broadcast game announcement through LiveKit data channel."""
-        await self.send_data_message(
-            "announcement", {"text": announcement, "timestamp": time.time()}
-        )
-
+        message = create_announcement_message(announcement)
+        await self.send_data_message(message)
         # Also add to observations as normal
         self.add_announcement(announcement)
 
