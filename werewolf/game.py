@@ -56,7 +56,6 @@ class GameMaster:
         self.num_threads = num_threads
         self.logs: List[RoundLog] = []
         self.human_player: PipecatHumanPlayer | None = None
-        self.room_name = room_name or f"werewolf_game_{state.session_id}"
 
         # Find human player
         for p in self.state.players.values():
@@ -65,34 +64,6 @@ class GameMaster:
                 self.human_player = p
                 tqdm.tqdm.write(f"Human player found: {self.human_player.name}")
                 break
-
-        # Setup LiveKit API for room management
-        self.livekit_api_key = os.getenv("LIVEKIT_API_KEY")
-        self.livekit_api_secret = os.getenv("LIVEKIT_API_SECRET")
-
-    # async def setup_livekit_room(self):
-    #     """Setup LiveKit room for all players."""
-    #     if not self.livekit_api_key or not self.livekit_api_secret:
-    #         tqdm.tqdm.write("LiveKit credentials not found, running without LiveKit")
-    #         return
-
-    #     try:
-    #         # Create room if it doesn't exist
-    #         livekit_api = api.LiveKitAPI(
-    #             url=os.getenv("LIVEKIT_URL", "wss://localhost:7880"),
-    #             api_key=self.livekit_api_key,
-    #             api_secret=self.livekit_api_secret
-    #         )
-
-    #         # Setup human player first if exists
-    #         if self.human_player:
-    #             token = self.human_player.setup_livekit_for_user(self.room_name)
-    #             tqdm.tqdm.write(f"Human player {self.human_player.name} LiveKit token ready")
-
-    #         tqdm.tqdm.write(f"LiveKit room '{self.room_name}' setup complete")
-
-    #     except Exception as e:
-    #         tqdm.tqdm.write(f"Error setting up LiveKit room: {e}")
 
     async def broadcast_to_human(self, message_type: str, data=None):
         """Broadcast message to human player if present."""

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Track, Room } from 'livekit-client';
+import { RoomEvent, Track } from 'livekit-client';
 import { Participant } from './Participant';
 import { AudioControls } from './AudioControls';
 import { GameUI } from './GameUI';
@@ -18,17 +18,15 @@ import '../styles/GameRoom.css';
  * @param {GameRoomProps} props - Component props
  */
 export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
-  const [canSpeak, setCanSpeak] = useState(false);
-  const [isVoting, setIsVoting] = useState(false);
-  const [votedPlayer, setVotedPlayer] = useState(null);
-  const [currentTurn, setCurrentTurn] = useState(1);
-  const maxTurns = 5; // Example max turns per phase
+  // ----- Local UI state -----
   const [participants, setParticipants] = useState([]);
-  // Track audio tracks per participant
   const [participantTracks, setParticipantTracks] = useState(new Map());
   const [isMuted, setIsMuted] = useState(false);
+
+  // Game state
   const [gameState, setGameState] = useState({
     phase: 'lobby',
+    round: 0,
     players: [],
     currentPlayer: {
       id: room?.localParticipant?.identity,
@@ -36,66 +34,226 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
       role: playerRole,
       isHost: false
     },
-    logs: [], // Add logs array to store game events
-    announcements: [], // Add announcements array
-    targetSelection: { // Add target selection state
+    logs: [],
+    announcements: [],
+    debate: {
+      current_speaker: null,
+      current_turn: 0,
+      max_turns: 8,
+      history: [],
+      turns_left: 8
+    },
+    voting: {
+      active: false,
+      votes: {},
+      voted_player: null,
+      results: null
+    },
+    targetSelection: {
       active: false,
       action: null,
       options: [],
       prompt: ''
     },
+    interaction: {
+      can_speak: false,
+      speak_timeout: null,
+      speaking_prompt: ''
+    }
   });
 
-  // Track mounted state to prevent state updates after unmount
   const isMounted = useRef(true);
+  const speakTimeoutRef = useRef(null);
 
-  // // Cleanup on unmount
-  // useEffect(() => {
-  //   return () => {
-  //     isMounted.current = false;
-  //   };
-  // }, []);
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+      if (speakTimeoutRef.current) {
+        clearTimeout(speakTimeoutRef.current);
+      }
+    };
+  }, []);
 
-  // Handle remote participants and data messages
+  const handleGameStateUpdate = useCallback((newGameState) => {
+    if (!isMounted.current) return;
+
+    console.log('Received game state:', newGameState);
+
+    setGameState(prev => {
+      // Update players based on the new game state
+      const updatedPlayers = (newGameState.players || []).map(player => {
+        const existingPlayer = prev.players.find(p => p.id === player.id) || {};
+        return {
+          ...existingPlayer,
+          ...player,
+          isAlive: player.isAlive !== undefined ? player.isAlive : true,
+        };
+      });
+
+      // If current_players is provided, use that to determine alive status
+      if (newGameState.current_players) {
+        updatedPlayers.forEach(player => {
+          player.isAlive = newGameState.current_players.includes(player.id || player.name);
+        });
+      }
+
+      return {
+        ...prev,
+        phase: newGameState.phase || prev.phase,
+        round: newGameState.round || prev.round,
+        players: updatedPlayers,
+        logs: newGameState.observations || prev.logs,
+        currentPlayer: {
+          ...prev.currentPlayer,
+          role: newGameState.role || prev.currentPlayer.role,
+        },
+        debate: {
+          ...prev.debate,
+          turns_left: newGameState.debate_turns_left || prev.debate.turns_left,
+          max_turns: newGameState.num_players || prev.debate.max_turns,
+        }
+      };
+    });
+  }, []);
+
+  const updateBasedOnType = (message) => {
+    switch (message.update_type) {
+      case 'day_phase_start':
+        setGameState(prev => ({
+          ...prev,
+          phase: 'day',
+          round: message.data?.round || prev.round,
+          debate: {
+            ...prev.debate,
+            current_speaker: null,
+            current_turn: 0,
+            history: []
+          },
+          voting: {
+            ...prev.voting,
+            active: false,
+            voted_player: null,
+            votes: {}
+          },
+          interaction: {
+            ...prev.interaction,
+            can_speak: false
+          }
+        }));
+        break;
+
+      case 'night_phase_start':
+        setGameState(prev => ({
+          ...prev,
+          phase: 'night',
+          round: message.data?.round || prev.round,
+          interaction: {
+            ...prev.interaction,
+            can_speak: false
+          }
+        }));
+        break;
+
+      case 'debate_update':
+        const { speaker, dialogue, turn } = message.data || {};
+        setGameState(prev => ({
+          ...prev,
+          phase: 'day',
+          debate: {
+            ...prev.debate,
+            current_speaker: speaker,
+            current_turn: turn || prev.debate.current_turn + 1,
+            history: [...prev.debate.history, { speaker, dialogue, turn }],
+            turns_left: Math.max(0, prev.debate.max_turns - (turn || prev.debate.current_turn + 1))
+          }
+        }));
+        break;
+
+      case 'voting_phase':
+        setGameState(prev => ({
+          ...prev,
+          phase: 'voting',
+          interaction: {
+            ...prev.interaction,
+            can_speak: false
+          }
+        }));
+        break;
+
+      case 'voting_started':
+        setGameState(prev => ({
+          ...prev,
+          voting: {
+            ...prev.voting,
+            active: true,
+            votes: {},
+            voted_player: null
+          }
+        }));
+        break;
+
+      case 'vote_received':
+        const { voter, target } = message.data || {};
+        setGameState(prev => ({
+          ...prev,
+          voting: {
+            ...prev.voting,
+            votes: { ...prev.voting.votes, [voter]: target }
+          }
+        }));
+        break;
+
+      case 'voting_ended':
+        setGameState(prev => ({
+          ...prev,
+          voting: {
+            ...prev.voting,
+            active: false,
+            results: message.data?.votes || prev.voting.votes
+          }
+        }));
+        break;
+
+      case 'voting_results':
+        setGameState(prev => ({
+          ...prev,
+          voting: {
+            ...prev.voting,
+            results: message.data?.results
+          }
+        }));
+        break;
+
+      case 'player_exiled':
+        const exiledPlayer = message.data?.player;
+        setGameState(prev => ({
+          ...prev,
+          players: prev.players.map(p => 
+            p.id === exiledPlayer || p.name === exiledPlayer 
+              ? { ...p, isAlive: false } 
+              : p
+          )
+        }));
+        break;
+      default:
+        break;
+    }
+  }
+
   useEffect(() => {
     if (!room) return;
 
     const onParticipantConnected = (participant) => {
-      console.log('Participant connected:', participant.identity);
       if (!isMounted.current) return;
-
-      setParticipants(prev => {
-        // Don't add if already in the list
-        if (prev.some(p => p.identity === participant.identity)) return prev;
-        return [...prev, participant];
-      });
-
-      // Add to game state
-      setGameState(prev => ({
-        ...prev,
-        players: [
-          ...prev.players,
-          {
-            id: participant.identity,
-            name: participant.identity,
-            isAlive: true,
-            role: 'villager' // Default role, will be updated by game state
-          }
-        ]
-      }));
+      console.log('Participant connected:', participant.identity);
+      setParticipants(prev => prev.some(p => p.identity === participant.identity) ? prev : [...prev, participant]);
     };
 
     const onParticipantDisconnected = (participant) => {
-      console.log('Participant disconnected:', participant.identity);
       if (!isMounted.current) return;
-
+      console.log('Participant disconnected:', participant.identity);
       setParticipants(prev => prev.filter((p) => p.identity !== participant.identity));
-
-      // Update game state
-      setGameState(prev => ({
-        ...prev,
-        players: prev.players.filter(p => p.id !== participant.identity)
-      }));
     };
 
     const onTrackSubscribed = (track, publication, participant) => {
@@ -104,12 +262,9 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
         setParticipantTracks(prev => {
           const newTracks = new Map(prev);
           const participantTracks = newTracks.get(participant.identity) || [];
-
-          // Don't add duplicate tracks
           if (!participantTracks.some(t => t.sid === track.sid)) {
             newTracks.set(participant.identity, [...participantTracks, track]);
           }
-
           return newTracks;
         });
       }
@@ -121,361 +276,143 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
         setParticipantTracks(prev => {
           const newTracks = new Map(prev);
           const participantTracks = newTracks.get(participant.identity) || [];
-
           if (participantTracks.length > 0) {
-            newTracks.set(
-              participant.identity,
-              participantTracks.filter(t => t.sid !== track.sid)
-            );
+            newTracks.set(participant.identity, participantTracks.filter(t => t.sid !== track.sid));
           }
-
           return newTracks;
         });
       }
     };
 
-    const onDataReceived = (data, participant, kind, topic) => {
+    const onDataReceived = (payload) => {
+      if (!isMounted.current) return;
       try {
-        const message = JSON.parse(new TextDecoder().decode(data));
-        console.log('Received game message of type:', message.type, 'and update_type:', message.update_type, 'with data:', message.data, 'from', participant.identity);
-        console.log('Full message structure:', JSON.stringify(message, null, 2)); // Debug full message
-        handleGameMessage(message);
+        const message = JSON.parse(new TextDecoder().decode(payload));
+        console.log('Parsed message:', message);
+
+        switch (message.type) {
+          case 'game_state_update':
+            if (message.game_state) {
+              handleGameStateUpdate(message.game_state);
+            }
+            updateBasedOnType(message);
+
+            break;
+
+          case 'can_speak':
+            const timeout = message.data?.timeout || 5;
+            const prompt = message.data?.prompt || 'You can speak now!';
+            
+            // Clear any existing timeout
+            if (speakTimeoutRef.current) {
+              clearTimeout(speakTimeoutRef.current);
+            }
+            
+            setGameState(prev => ({
+              ...prev,
+              interaction: {
+                ...prev.interaction,
+                can_speak: true,
+                speaking_prompt: prompt
+              }
+            }));
+
+            // Set timeout to disable speaking
+            speakTimeoutRef.current = setTimeout(() => {
+              setGameState(prev => ({
+                ...prev,
+                interaction: {
+                  ...prev.interaction,
+                  can_speak: false,
+                  speaking_prompt: ''
+                }
+              }));
+            }, timeout * 1000);
+            break;
+
+          case 'speaking_ended':
+          case 'debate_turn':
+            setGameState(prev => ({
+              ...prev,
+              interaction: {
+                ...prev.interaction,
+                can_speak: message.type === 'debate_turn',
+                speaking_prompt: message.type === 'debate_turn' 
+                  ? "It's your turn to speak!" 
+                  : ''
+              }
+            }));
+            break;
+
+          case 'request_vote':
+            setGameState(prev => ({
+              ...prev,
+              voting: {
+                ...prev.voting,
+                active: true,
+                voted_player: null
+              }
+            }));
+            break;
+
+          case 'announcement':
+            if (message.data?.text) {
+              setGameState(prev => ({
+                ...prev,
+                announcements: [...prev.announcements, { 
+                  id: Date.now(), 
+                  message: message.data.text,
+                  timestamp: new Date().toLocaleTimeString()
+                }],
+              }));
+            }
+            break;
+
+          case 'request_target_selection':
+            if (message.data) {
+              setGameState(prev => ({
+                ...prev,
+                targetSelection: {
+                  active: true,
+                  action: message.data.action,
+                  options: message.data.options,
+                  prompt: message.data.prompt,
+                },
+              }));
+            }
+            break;
+
+          default:
+            console.warn('Unknown message type:', message.type);
+        }
       } catch (error) {
-        console.error('Error parsing message:', error);
+        console.error('Failed to parse data message:', error);
       }
     };
 
-    // Set initial participants
-    const initialParticipants = Array.from(room.remoteParticipants.values());
-    setParticipants(initialParticipants);
+    setParticipants(Array.from(room.remoteParticipants.values()));
 
-    // Initialize game state with existing participants
-    setGameState(prev => ({
-      ...prev,
-      players: initialParticipants.map(p => ({
-        id: p.identity,
-        name: p.identity,
-        isAlive: true,
-        role: 'villager'
-      }))
-    }));
-
-    // Set up event listeners
     room
-      .on('participantConnected', onParticipantConnected)
-      .on('participantDisconnected', onParticipantDisconnected)
-      .on('trackSubscribed', onTrackSubscribed)
-      .on('trackUnsubscribed', onTrackUnsubscribed)
-      .on('dataReceived', onDataReceived);
+      .on(RoomEvent.ParticipantConnected, onParticipantConnected)
+      .on(RoomEvent.ParticipantDisconnected, onParticipantDisconnected)
+      .on(RoomEvent.TrackSubscribed, onTrackSubscribed)
+      .on(RoomEvent.TrackUnsubscribed, onTrackUnsubscribed)
+      .on(RoomEvent.DataReceived, onDataReceived);
 
     return () => {
       room
-        .off('participantConnected', onParticipantConnected)
-        .off('participantDisconnected', onParticipantDisconnected)
-        .off('trackSubscribed', onTrackSubscribed)
-        .off('trackUnsubscribed', onTrackUnsubscribed)
-        .off('dataReceived', onDataReceived);
+        .off(RoomEvent.ParticipantConnected, onParticipantConnected)
+        .off(RoomEvent.ParticipantDisconnected, onParticipantDisconnected)
+        .off(RoomEvent.TrackSubscribed, onTrackSubscribed)
+        .off(RoomEvent.TrackUnsubscribed, onTrackUnsubscribed)
+        .off(RoomEvent.DataReceived, onDataReceived);
     };
-  }, [room]);
-
-  // Helper functions for message handling
-  const updateGameLogs = useCallback((logMessage) => {
-    setGameState(prev => ({
-      ...prev,
-      logs: [...prev.logs, logMessage]
-    }));
-  }, []);
-
-  const updateGamePhase = useCallback((phase, additionalData = {}) => {
-    setGameState(prev => ({
-      ...prev,
-      phase,
-      ...additionalData
-    }));
-  }, []);
-
-  // Message handlers for different types
-  const handleGameStateUpdate = useCallback((message) => {
-    const { update_type, data } = message;
-
-    switch (update_type) {
-      case 'game_state':
-        // Full game state update
-        setGameState(prev => ({
-          ...prev,
-          ...data,
-          players: data.players || prev.players,
-          logs: [...prev.logs, '🎮 Game state updated']
-        }));
-        break;
-
-      case 'day_phase_start':
-        setGameState(prev => ({
-          ...prev,
-          players: data.players || prev.players,
-          phase: 'day',
-          currentTurn: data.round || 1,
-          maxTurns: data.maxTurns || 5,
-          logs: [...prev.logs, `🌅 Day ${data.round || 1} begins! Debate and vote to eliminate a player.`]
-        }));
-        setCurrentTurn(data.round || 1);
-        break;
-
-      case 'night_phase_start':
-        setGameState(prev => ({
-          ...prev,
-          players: data.players || prev.players,
-          phase: 'night',
-          currentTurn: data.round || 1,
-          logs: [...prev.logs, `🌙 Night ${data.round || 1} falls. Special roles, make your moves...`]
-        }));
-        setCurrentTurn(data.round || 1);
-        break;
-
-      case 'debate_update':
-        console.log('Processing debate_update:', data);
-        setGameState(prev => {
-          const newLogs = [...prev.logs];
-
-          if (data?.dialogue && data?.speaker) {
-            newLogs.push(`💬 ${data.speaker}: ${data.dialogue}`);
-            console.log('Added debate log:', `💬 ${data.speaker}: ${data.dialogue}`);
-          }
-
-          return {
-            ...prev,
-            currentTurn: data?.turn,
-            currentSpeaker: data?.speaker,
-            maxTurns: data?.maxTurns,
-            logs: newLogs
-          };
-        });
-        setCurrentTurn(data?.turn);
-
-        // If it's the local player's turn, show speaking prompt
-        if (data?.speaker === playerName) {
-          setCanSpeak(true);
-          const speakTime = data?.speakTime || 30;
-          setTimeout(() => setCanSpeak(false), speakTime * 1000);
-        }
-        break;
-
-      case 'voting_phase':
-        updateGamePhase('voting');
-        updateGameLogs(`🗳️ ${data.message || 'Voting phase has begun'}`);
-        break;
-
-      case 'voting_started':
-        setIsVoting(true);
-        setVotedPlayer(null);
-        setGameState(prev => ({
-          ...prev,
-          phase: 'voting',
-          voting: { ...prev.voting, isActive: true, votes: {} },
-          logs: [...prev.logs, '🗳️ Voting has started!']
-        }));
-        break;
-
-      case 'voting_ended':
-        setIsVoting(false);
-        setGameState(prev => ({
-          ...prev,
-          voting: { ...prev.voting, isActive: false },
-          logs: [...prev.logs, '🗳️ Voting has ended.']
-        }));
-        break;
-
-      case 'vote_received':
-        const { voter, target } = data;
-        if (voter === room.localParticipant.identity) {
-          setVotedPlayer(target);
-        }
-        setGameState(prev => ({
-          ...prev,
-          voting: {
-            ...prev.voting,
-            votes: { ...prev.voting?.votes, [voter]: target }
-          },
-          logs: [...prev.logs, `🗳️ ${voter} voted for ${target}`]
-        }));
-        break;
-
-      case 'voting_results':
-        if (data.message) {
-          updateGameLogs(`📊 ${data.message}`);
-        }
-        if (data.results) {
-          const { vote_counts, most_voted, vote_count } = data.results;
-          updateGameLogs(`📊 Results: ${Object.entries(vote_counts).map(([player, votes]) => `${player}: ${votes}`).join(', ')}`);
-        }
-        break;
-
-      case 'player_exiled':
-        if (data.player) {
-          updateGameLogs(`⚰️ ${data.player} has been eliminated from the game!`);
-          // Remove player from active players list
-          setGameState(prev => ({
-            ...prev,
-            players: prev.players.map(p =>
-              p.id === data.player ? { ...p, isAlive: false } : p
-            )
-          }));
-        }
-        break;
-
-      case 'player_update':
-        setGameState(prev => ({
-          ...prev,
-          players: prev.players.map(p =>
-            p.id === data.id ? { ...p, ...data } : p
-          )
-        }));
-        break;
-
-      case 'phase_change':
-        updateGamePhase(data.phase, { phaseData: data });
-        updateGameLogs(`⏰ Phase changed to: ${data.phase}`);
-        break;
-
-      default:
-        console.log('Unhandled game_state_update type:', update_type);
-    }
-  }, [playerName, room, updateGameLogs, updateGamePhase]);
-
-  const handleDirectMessage = useCallback((message) => {
-    const { type, data, prompt, options, action, timeout, text, timestamp } = message;
-
-    switch (type) {
-      case 'request_vote':
-        // Show voting UI
-        setIsVoting(true);
-        setVotedPlayer(null);
-        updateGameLogs(`🗳️ ${prompt || 'Please cast your vote'}`);
-        // Could show available options in UI
-        if (options) {
-          console.log('Voting options:', options);
-        }
-        break;
-
-      case 'can_speak':
-        setCanSpeak(true);
-        const speakTime = timeout ? timeout * 1000 : 5000;
-        setTimeout(() => setCanSpeak(false), speakTime);
-        updateGameLogs(`🎤 ${prompt || 'You can speak now'}`);
-        break;
-
-      case 'speaking_ended':
-        setCanSpeak(false);
-        updateGameLogs(`🔇 Speaking time ended`);
-        break;
-
-      case 'debate_turn':
-        setCanSpeak(true);
-        updateGameLogs(`💬 ${prompt || 'Your turn to speak'}`);
-        break;
-
-      case 'request_target_selection':
-        // Show target selection UI
-        updateGameLogs(`🎯 ${prompt || `Choose target for ${action}`}`);
-        // Could show available options
-        if (options) {
-          console.log('Target selection options:', options);
-          // Update UI to show target selection
-          setGameState(prev => ({
-            ...prev,
-            targetSelection: {
-              active: true,
-              action: action,
-              options: options,
-              prompt: prompt
-            }
-          }));
-        }
-        break;
-
-      case 'announcement':
-        if (text) {
-          updateGameLogs(`📢 ${text}`);
-          setGameState(prev => ({
-            ...prev,
-            announcements: [...prev.announcements, {
-              id: Date.now(),
-              message: text,
-              timestamp: timestamp || Date.now()
-            }]
-          }));
-        }
-        break;
-
-      default:
-        console.log('Unhandled direct message type:', type);
-    }
-  }, [updateGameLogs]);
-
-  const handleGameMessage = useCallback((message) => {
-    if (!isMounted.current) return;
-
-    console.log('Handling game message:', message);
-
-    try {
-      // Route to appropriate handler based on message structure
-      if (message.type === 'game_state_update') {
-        handleGameStateUpdate(message);
-      } else {
-        // Handle direct message types
-        handleDirectMessage(message);
-      }
-    } catch (error) {
-      console.error('Error handling game message:', error, message);
-      updateGameLogs(`❌ Error processing game message: ${error.message}`);
-    }
-  }, [handleGameStateUpdate, handleDirectMessage, updateGameLogs]);
-
-  const handleVote = useCallback((playerId) => {
-    if (!room) return;
-
-    const message = {
-      type: 'vote',
-      target: playerId,
-      voter: room.localParticipant.identity
-    };
-
-    room.localParticipant.publishData(
-      new TextEncoder().encode(JSON.stringify(message)),
-      { reliable: true }
-    );
-
-    // Update local state
-    setVotedPlayer(playerId);
-  }, [room]);
-
-  const handleVoteSubmit = useCallback(() => {
-    if (!room || !votedPlayer) return;
-
-    const message = {
-      type: 'submit_vote',
-      target: votedPlayer,
-      voter: room.localParticipant.identity
-    };
-
-    room.localParticipant.publishData(
-      new TextEncoder().encode(JSON.stringify(message)),
-      { reliable: true }
-    );
-
-    // Disable voting UI after submission
-    setIsVoting(false);
-  }, [room, votedPlayer]);
+  }, [room, handleGameStateUpdate]);
 
   const toggleMute = useCallback(async () => {
     if (!room) return;
-
     try {
-      if (isMuted) {
-        await room.localParticipant.setMicrophoneEnabled(true);
-      } else {
-        await room.localParticipant.setMicrophoneEnabled(false);
-      }
+      await room.localParticipant.setMicrophoneEnabled(!isMuted);
       setIsMuted(!isMuted);
     } catch (error) {
       console.error('Error toggling mute:', error);
@@ -484,13 +421,9 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
 
   const sendMessage = useCallback((message) => {
     if (!room) return false;
-
     try {
       const payload = JSON.stringify(message);
-      room.localParticipant.publishData(
-        new TextEncoder().encode(payload),
-        { reliable: true }
-      );
+      room.localParticipant.publishData(new TextEncoder().encode(payload), { reliable: true });
       return true;
     } catch (error) {
       console.error('Error sending message:', error);
@@ -498,50 +431,26 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
     }
   }, [room]);
 
-  const handleAction = useCallback((action, target) => {
-    sendMessage({
-      type: 'action',
-      action,
-      target,
-      timestamp: Date.now()
-    });
-  }, [sendMessage]);
+  const handleVote = useCallback((playerId) => {
+    if (!room) return;
+    sendMessage({ type: 'vote', target: playerId });
+    setGameState(prev => ({
+      ...prev,
+      voting: {
+        ...prev.voting,
+        voted_player: playerId
+      }
+    }));
+  }, [room, sendMessage]);
 
   const handleTargetSelection = useCallback((target) => {
     if (!room) return;
-
-    const message = {
-      type: 'target_selection',
-      target: target,
-      player: room.localParticipant.identity
-    };
-
-    room.localParticipant.publishData(
-      new TextEncoder().encode(JSON.stringify(message)),
-      { reliable: true }
-    );
-
-    // Clear target selection UI
+    sendMessage({ type: 'target_selection', target: target });
     setGameState(prev => ({
       ...prev,
-      targetSelection: {
-        active: false,
-        action: null,
-        options: [],
-        prompt: ''
-      }
+      targetSelection: { active: false, action: null, options: [], prompt: '' }
     }));
-
-    console.log('Target selection sent:', message);
-  }, [room]);
-
-  const sendChatMessage = useCallback((message) => {
-    sendMessage({
-      type: 'chat',
-      message,
-      timestamp: Date.now()
-    });
-  }, [sendMessage]);
+  }, [room, sendMessage]);
 
   if (!room) {
     return (
@@ -556,7 +465,7 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
       <div className="game-header">
         <h2>Room: {roomName}</h2>
         <div className="player-info">
-          {playerName} ({playerRole})
+          {playerName} ({gameState.currentPlayer.role})
           <span className={`connection-status ${room.state === 'connected' ? 'connected' : 'disconnected'}`}>
             {room.state === 'connected' ? '●' : '○'}
           </span>
@@ -567,14 +476,18 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
         <div className="participants-grid">
           {participants.map((participant) => {
             const tracks = Array.from(participantTracks.get(participant.identity) || []);
+            const playerState = gameState.players.find(p => p.id === participant.identity || p.name === participant.identity);
+            const isCurrentSpeaker = gameState.debate.current_speaker === participant.identity;
+            
             return (
               <Participant
                 key={participant.identity}
                 audioTracks={tracks}
                 participant={participant}
                 isLocal={participant.identity === playerName}
-                isSpeaking={false} // This would come from audio level monitoring
-                role={gameState.players.find(p => p.id === participant.identity)?.role || 'villager'}
+                isSpeaking={isCurrentSpeaker}
+                role={playerState?.role || 'villager'}
+                isAlive={playerState?.isAlive !== false}
               />
             );
           })}
@@ -584,17 +497,9 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
           <GameUI
             gameState={gameState}
             onVote={handleVote}
-            onAction={handleAction}
             onTargetSelection={handleTargetSelection}
-            onChatMessage={sendChatMessage}
             playerName={playerName}
-            playerRole={playerRole}
-            currentTurn={currentTurn}
-            maxTurns={maxTurns}
-            canSpeak={canSpeak}
-            isVoting={isVoting}
-            onVoteSubmit={handleVoteSubmit}
-            votedPlayer={votedPlayer}
+            sendMessage={sendMessage}
           />
         </div>
       </div>
@@ -607,9 +512,10 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
 
       {gameState.announcements?.length > 0 && (
         <div className="announcements">
-          {gameState.announcements.map(announcement => (
+          {gameState.announcements.slice(-3).map(announcement => (
             <div key={announcement.id} className="announcement">
-              {announcement.message}
+              <span className="announcement-time">{announcement.timestamp}</span>
+              <span className="announcement-text">{announcement.message}</span>
             </div>
           ))}
         </div>

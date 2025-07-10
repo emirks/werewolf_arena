@@ -22,7 +22,6 @@ from werewolf.lm import LmLog, generate
 from werewolf.prompts import ACTION_PROMPTS_AND_SCHEMAS
 from werewolf.utils import Deserializable
 from werewolf.config import MAX_DEBATE_TURNS, NUM_PLAYERS
-from werewolf.livekit_participant import LiveKitParticipant
 from werewolf.pipecat_ai_player import PipecatAIPlayer
 
 # Role names
@@ -226,7 +225,12 @@ class Player(PipecatAIPlayer):
             player for player in self.gamestate.current_players if player != self.name
         ]
         random.shuffle(options)
-        vote, log = await self._generate_action("vote", options)
+        # vote, log = await self._generate_action("vote", options)
+        vote, log = options[-1], LmLog(
+            prompt="Human input",
+            raw_resp="",
+            result={"vote": options[0], "reasoning": "Human decision"},
+        )
         if vote is not None and len(self.gamestate.debate) == MAX_DEBATE_TURNS:
             self._add_observation(
                 f"After the debate, I voted to remove {vote} from the game."
@@ -235,7 +239,13 @@ class Player(PipecatAIPlayer):
 
     async def bid(self) -> tuple[int | None, LmLog]:
         """Place a bid."""
-        bid, log = await self._generate_action("bid", options=["0", "1", "2", "3", "4"])
+        # bid, log = await self._generate_action("bid", options=["0", "1", "2", "3", "4"])
+        bid, log = 0, LmLog(
+            prompt="Human input",
+            raw_resp="",
+            result={"bid": 0, "reasoning": "Human decision"},
+        )
+        print(f"Bid: {bid}")
         if bid is not None:
             bid = int(bid)
             self.bidding_rationale = log.result.get("reasoning", "")
@@ -243,7 +253,13 @@ class Player(PipecatAIPlayer):
 
     async def debate(self) -> tuple[str | None, LmLog]:
         """Engage in the debate."""
-        result, log = await self._generate_action("debate", [])
+        # result, log = await self._generate_action("debate", [])
+        result, log = {"say": "", "reasoning": "Human decision"}, LmLog(
+            prompt="Human input",
+            raw_resp="",
+            result={"say": "", "reasoning": "Human decision"},
+        )
+        print(f"Debate: {result}")
         if result is not None:
             say = result.get("say", None)
             if say:
@@ -253,7 +269,13 @@ class Player(PipecatAIPlayer):
 
     async def summarize(self) -> tuple[str | None, LmLog]:
         """Summarize the game state."""
-        result, log = await self._generate_action("summarize", [])
+        # result, log = await self._generate_action("summarize", [])
+        result, log = {"summary": "", "reasoning": "Human decision"}, LmLog(
+            prompt="Human input",
+            raw_resp="",
+            result={"summary": "", "reasoning": "Human decision"},
+        )
+        print(f"Summarize: {result}")
         if result is not None:
             summary = result.get("summary", None)
             if summary is not None:
@@ -341,7 +363,13 @@ class Werewolf(Player):
             if player != self.name and player != self.gamestate.other_wolf
         ]
         random.shuffle(options)
-        eliminate, log = await self._generate_action("remove", options)
+        # eliminate, log = await self._generate_action("remove", options)
+        eliminate, log = options[-1], LmLog(
+            prompt="Human input",
+            raw_resp="",
+            result={"remove": options[0], "reasoning": "Human decision"},
+        )
+        print(f"Eliminate: {eliminate}")
         return eliminate, log
 
     def _get_werewolf_context(self):
@@ -396,7 +424,12 @@ class Seer(Player):
             if player != self.name and player not in self.previously_unmasked.keys()
         ]
         random.shuffle(options)
-        return await self._generate_action("investigate", options)
+        # return await self._generate_action("investigate", options)
+        return options[-1], LmLog(
+            prompt="Human input",
+            raw_resp="",
+            result={"investigate": options[0], "reasoning": "Human decision"},
+        )
 
     def reveal_and_update(self, player, role):
         self._add_observation(
@@ -436,7 +469,13 @@ class Doctor(Player):
 
         options = list(self.gamestate.current_players)
         random.shuffle(options)
-        protected, log = await self._generate_action("protect", options)
+        # protected, log = await self._generate_action("protect", options)
+        protected, log = options[-1], LmLog(
+            prompt="Human input",
+            raw_resp="",
+            result={"protect": options[0], "reasoning": "Human decision"},
+        )
+        print(f"Protect: {protected}")
         if protected is not None:
             self._add_observation(f"During the night, I chose to protect {protected}")
         return protected, log

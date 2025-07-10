@@ -683,6 +683,7 @@ class PipecatHumanPlayer(Deserializable):
             update_data["data"] = data
 
         await self.send_data_message("game_state_update", update_data)
+        logger.info(f"Sent game state update: {update_data}")
 
     async def broadcast_announcement(self, announcement: str):
         """Broadcast game announcement through LiveKit data channel."""
