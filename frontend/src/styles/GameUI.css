@@ -2,419 +2,265 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background-color: var(--surface-color);
+  background-color: var(--background-color);
   border-radius: var(--radius-lg);
   overflow: hidden;
+  color: var(--text-primary);
 }
 
-/* Game Status */
 .game-status {
   display: flex;
-  gap: var(--spacing-md);
-  padding: var(--spacing-md);
-  background-color: var(--background-color);
+  justify-content: space-around;
+  padding: 0.5rem 0.5rem 0.25rem 0.5rem;
+  background-color: var(--surface-color);
   border-bottom: 1px solid var(--border-color);
+  font-size: 0.95rem;
 }
 
 .status-item {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-xs);
+  text-align: center;
+  margin: 0 0.5rem;
 }
 
 .status-label {
   font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   color: var(--text-secondary);
+  text-transform: uppercase;
+  display: block;
 }
 
 .status-value {
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: var(--text-primary);
+  font-size: 1.1rem;
+  font-weight: bold;
 }
 
-.status-value.phase-day { color: var(--primary-color); }
-.status-value.phase-night { color: var(--text-secondary); }
-.status-value.phase-voting { color: var(--error-color); }
+.phase-day { color: var(--primary-color); }
+.phase-night { color: var(--error-color); }
+.phase-voting { color: var(--error-color); }
+.phase-lobby { color: var(--primary-color); }
 
-/* Game UI Content */
 .game-ui-content {
-  flex: 1;
+  flex-grow: 1;
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-md);
-  padding: var(--spacing-md);
+  width: 100%;
+  gap: 1rem;
+  padding: 1rem;
+  overflow: hidden;
+}
+
+.main-panel {
+  display: flex;
+  flex-grow: 1;
+  flex-direction: row;
+  gap: 1rem;
   overflow-y: auto;
 }
 
-/* Speaking Prompt */
-.speaking-prompt {
+.side-panel {
   display: flex;
-  align-items: center;
-  gap: var(--spacing-md);
-  padding: var(--spacing-md);
-  background-color: rgba(99, 102, 241, 0.1);
-  border: 1px solid var(--primary-color);
-  border-radius: var(--radius-md);
-  margin-bottom: var(--spacing-md);
-}
-
-.mic-icon {
-  position: relative;
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--primary-color);
-}
-
-.pulse-ring {
-  position: absolute;
+  flex-direction: column;
   width: 100%;
   height: 100%;
-  border-radius: 50%;
-  border: 2px solid var(--primary-color);
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0% {
-    transform: scale(0.95);
-    opacity: 0.8;
-  }
-  50% {
-    transform: scale(1.2);
-    opacity: 0.4;
-  }
-  100% {
-    transform: scale(0.95);
-    opacity: 0.8;
-  }
-}
-
-.prompt-content {
-  flex: 1;
-}
-
-.prompt-content h3 {
-  color: var(--primary-color);
-  margin-bottom: var(--spacing-xs);
-  font-size: 1rem;
-}
-
-.prompt-content p {
-  color: var(--text-secondary);
-  font-size: 0.875rem;
-}
-
-/* Players List */
-.players-list {
-  background-color: var(--background-color);
-  border-radius: var(--radius-md);
-  padding: var(--spacing-md);
-}
-
-.players-list h3 {
-  margin-bottom: var(--spacing-md);
-  font-size: 1rem;
-  color: var(--text-secondary);
-}
-
-.players-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: var(--spacing-sm);
-}
-
-/* Player Cards */
-.player-item {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  padding: var(--spacing-md);
-  background-color: var(--surface-color);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  transition: all 0.2s ease;
-}
-
-.player-item:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-sm);
-}
-
-.player-item.self {
-  border-color: var(--primary-color);
-  background-color: rgba(99, 102, 241, 0.1);
-}
-
-.player-item.eliminated {
-  opacity: 0.7;
-  background-color: rgba(239, 68, 68, 0.05);
-  border-color: var(--error-color);
-}
-
-.status-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
+  gap: 1rem;
+  overflow: visible;
   flex-shrink: 0;
 }
 
-.status-dot.alive {
-  background-color: var(--success-color);
-  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2);
+.sidebar-top-row {
+  display: flex;
+  flex-direction: row;
+  gap: 0.5rem;
+  width: 100%;
+  align-items: flex-start;
+  justify-content: flex-start;
+  margin-bottom: 0.5rem;
 }
 
-.status-dot.dead {
-  background-color: var(--error-color);
-  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
-}
-
-.player-name {
-  flex: 1;
-  font-size: 1rem;
-  font-weight: 500;
+.debate-status, .speaking-prompt {
+  flex: 0;
+  min-width: 250px;
+  margin-bottom: 0;
+  padding: 0.5rem;
+  box-sizing: border-box;
+  background: var(--surface-color);
+  border-radius: var(--radius-md);
   color: var(--text-primary);
 }
 
-.eliminated-tag {
-  font-size: 0.75rem;
-  color: var(--error-color);
-  background-color: rgba(239, 68, 68, 0.1);
-  padding: var(--spacing-xs) var(--spacing-sm);
-  border-radius: var(--radius-sm);
+.speaking-prompt {
+  margin-left: 0;
+  margin-right: 0;
+  border: 1px solid var(--primary-color);
+  box-shadow: 0 0 20px var(--primary-color);
 }
 
-/* Debate Status */
-.debate-status {
-  background-color: var(--background-color);
+.game-log {
+  width: 100%;
+  margin-top: 0.5rem;
+  overflow: visible;
+  padding: 0.5rem 0.75rem;
+  box-sizing: border-box;
+  background: var(--surface-color);
   border-radius: var(--radius-md);
-  padding: var(--spacing-md);
+  color: var(--text-primary);
 }
 
-.debate-info {
-  margin-bottom: var(--spacing-md);
+.log-entries {
+  gap: 0.25rem;
+  overflow: visible;
 }
 
-.debate-info h3 {
-  font-size: 1rem;
-  margin-bottom: var(--spacing-xs);
+/* Remove scrollbars from sidebar and its children */
+.side-panel, .sidebar-top-row, .game-log, .debate-status, .speaking-prompt {
+  overflow: visible !important;
+}
+
+/* Compact the components for minimal space */
+.debate-status, .speaking-prompt, .game-log {
+  padding: 0.75rem;
+}
+
+.current-speaker {
+  text-align: center;
+}
+
+.current-speaker .speaker-label {
+  display: block;
+  font-size: 0.9rem;
+  color: #a0a0c0;
+  margin-bottom: 0.25rem;
+}
+
+.current-speaker .speaker-name {
+  display: block;
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #fde047;
+}
+
+.current-speaker .speaker-name.you {
+  color: #4ade80;
+}
+
+.progress-bar-container {
+  width: 100%;
+}
+
+.progress-bar {
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 20px;
+  height: 12px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.progress-fill {
+  background-color: #fde047;
+  height: 100%;
+  border-radius: 20px;
+  transition: width 0.5s ease-in-out;
 }
 
 .turn-info {
   display: flex;
   justify-content: space-between;
-  font-size: 0.875rem;
-  color: var(--text-secondary);
+  font-size: 0.8rem;
+  color: #a0a0c0;
+  margin-top: 0.5rem;
 }
 
-.progress-bar {
-  height: 4px;
-  background-color: var(--border-color);
-  border-radius: 2px;
-  overflow: hidden;
-  margin: var(--spacing-md) 0;
+.phase-info, .game-log {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 1rem;
 }
 
-.progress-fill {
-  height: 100%;
-  background-color: var(--primary-color);
-  transition: width 0.3s ease;
+h3 {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.25rem;
 }
 
-.current-speaker {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  font-size: 0.875rem;
+/* Speaking Prompt */
+.speaking-prompt {
+  background: var(--surface-color);
+  border: 1px solid var(--secondary-color);
+  border-radius: 8px;
+  padding: 1.5rem;
+  text-align: center;
+  box-shadow: 0 0 20px var(--secondary-color);
 }
-
-.speaker-label {
-  color: var(--text-secondary);
-}
-
-.speaker-name {
-  font-weight: 500;
-}
-
-.speaker-name.you {
-  color: var(--primary-color);
-}
-
-/* Voting Interface */
-.voting-interface {
-  background-color: var(--background-color);
-  border-radius: var(--radius-md);
-  padding: var(--spacing-md);
-}
-
-.section-header {
-  margin-bottom: var(--spacing-md);
-}
-
-.section-header h3 {
-  font-size: 1rem;
-  margin-bottom: var(--spacing-xs);
-}
-
-.section-header p {
-  font-size: 0.875rem;
-  color: var(--text-secondary);
-}
-
-.voting-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: var(--spacing-sm);
-}
-
-.vote-button {
-  padding: var(--spacing-sm);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  background-color: var(--surface-color);
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.vote-button:hover {
-  border-color: var(--primary-color);
-  background-color: rgba(99, 102, 241, 0.1);
-}
-
-.vote-button.selected {
-  border-color: var(--primary-color);
-  background-color: rgba(99, 102, 241, 0.1);
-}
-
-.vote-confirmation {
-  padding: var(--spacing-md);
-  background-color: rgba(34, 197, 94, 0.1);
-  border-radius: var(--radius-md);
-}
-
-.vote-status {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  color: var(--success-color);
-}
-
-.check-icon {
-  font-size: 1.25rem;
-}
+.speaking-prompt .mic-icon { color: var(--primary-color); font-size: 2.5rem; }
+.speaking-prompt h3 { border: none; }
 
 /* Game Log */
-.game-log {
-  background-color: var(--background-color);
-  border-radius: var(--radius-md);
-  padding: var(--spacing-md);
-  margin-top: auto;
-}
-
-.game-log h3 {
-  font-size: 1rem;
-  margin-bottom: var(--spacing-md);
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-}
-
-.game-log h3::before {
-  content: '';
-  display: block;
-  width: 4px;
-  height: 16px;
-  background-color: var(--primary-color);
-  border-radius: 2px;
-}
-
 .log-entries {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-sm);
+  gap: 0.75rem;
 }
-
-.log-entry {
+.game-event {
   display: flex;
-  gap: var(--spacing-sm);
-  padding: var(--spacing-sm) var(--spacing-md);
-  background-color: var(--surface-color);
-  border-radius: var(--radius-sm);
-  border-left: 4px solid transparent;
-  font-size: 0.875rem;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.25rem 0;
+  font-size: 0.98rem;
+}
+.event-icon { font-size: 1.2rem; }
+
+/* Modals */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.8);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  backdrop-filter: blur(5px);
 }
 
-.log-time {
-  color: var(--text-secondary);
-  font-size: 0.75rem;
-  white-space: nowrap;
-}
-
-.log-text {
-  flex: 1;
+.modal-content {
+  background: var(--surface-color);
+  padding: 2rem;
+  border-radius: var(--radius-lg);
   color: var(--text-primary);
+  width: 90%;
+  max-width: 600px;
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-lg);
 }
 
-.log-entry.action {
-  border-left-color: var(--error-color);
-  background-color: rgba(239, 68, 68, 0.05);
-}
-
-.log-entry.announcement {
-  border-left-color: var(--primary-color);
-  background-color: rgba(99, 102, 241, 0.05);
-}
-
-.log-entry.vote {
-  border-left-color: var(--success-color);
-  background-color: rgba(34, 197, 94, 0.05);
-}
-
-/* Phase Info */
-.phase-info {
-  background-color: var(--background-color);
-  border-radius: var(--radius-md);
-  padding: var(--spacing-md);
-}
-
-.phase-content {
+.modal-title {
   text-align: center;
+  margin-top: 0;
+  margin-bottom: 2rem;
 }
 
-.phase-content h3 {
+.voting-grid, .target-selection-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 1rem;
+}
+
+.vote-button, .target-button {
+  padding: 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--surface-color);
+  color: var(--text-primary);
   font-size: 1rem;
-  margin-bottom: var(--spacing-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
 }
 
-.phase-content p {
-  font-size: 0.875rem;
-  color: var(--text-secondary);
-}
-
-.phase-content.waiting { color: var(--text-secondary); }
-.phase-content.day { color: var(--primary-color); }
-.phase-content.night { color: var(--text-secondary); }
-
-/* Scrollbar styling */
-.game-ui-content::-webkit-scrollbar {
-  width: 6px;
-}
-
-.game-ui-content::-webkit-scrollbar-track {
+.vote-button:hover, .target-button:hover {
   background: var(--background-color);
-}
-
-.game-ui-content::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
-}
-
-.game-ui-content::-webkit-scrollbar-thumb:hover {
-  background: var(--text-secondary);
+  border-color: var(--primary-color);
 }

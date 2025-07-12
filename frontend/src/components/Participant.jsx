@@ -8,6 +8,7 @@ import '../styles/Participant.css';
  * @property {boolean} isLocal - Whether this is the local participant
  * @property {boolean} [isSpeaking] - Whether the participant is currently speaking
  * @property {string} [role] - The participant's role in the game
+ * @property {boolean} [isAlive] - Whether the participant is alive
  */
 
 /**
@@ -19,89 +20,13 @@ export const Participant = ({
   audioTracks,
   isLocal, 
   isSpeaking: externalIsSpeaking = false,
-  role = 'villager' 
+  role = 'villager',
+  isAlive = true
 }) => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const audioRef = useRef(null);
-  const audioAnalyser = useRef(null);
-  const animationFrameRef = useRef(null);
-  const isMounted = useRef(true);
   
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      isMounted.current = false;
-      stopAudioLevelMonitoring();
-    };
-  }, []);
-
-  // Handle audio tracks
-  useEffect(() => {
-    if (!audioTracks || audioTracks.length === 0) return;
-    
-    // Start monitoring all audio tracks
-    audioTracks.forEach((track) => {
-      if (track.kind === Track.Kind.Audio) {
-        startAudioLevelMonitoring(track);
-      }
-    });
-    
-    return () => {
-      // Clean up audio level monitoring when tracks change
-      stopAudioLevelMonitoring();
-    };
-  }, [audioTracks]);
-
-  const startAudioLevelMonitoring = useCallback((track) => {
-    if (!track.mediaStreamTrack || audioAnalyser.current) return;
-    
-    if (!window.AudioContext && !window.webkitAudioContext) {
-      console.warn('AudioContext not supported in this browser');
-      return;
-    }
-    
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    const audioContext = new AudioContext();
-    const source = audioContext.createMediaStreamSource(
-      new MediaStream([track.mediaStreamTrack])
-    );
-    
-    audioAnalyser.current = audioContext.createAnalyser();
-    audioAnalyser.current.fftSize = 32;
-    source.connect(audioAnalyser.current);
-
-    const dataArray = new Uint8Array(audioAnalyser.current.frequencyBinCount);
-    
-    const checkAudioLevel = () => {
-      if (!audioAnalyser.current) return;
-      
-      audioAnalyser.current.getByteFrequencyData(dataArray);
-      
-      // Calculate average volume
-      const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-      setIsSpeaking(average > 20); // Adjust threshold as needed
-      
-      animationFrameRef.current = requestAnimationFrame(checkAudioLevel);
-    };
-    
-    checkAudioLevel();
-  }, []);
-
-  const stopAudioLevelMonitoring = () => {
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
-    }
-    
-    if (audioAnalyser.current) {
-      audioAnalyser.current.disconnect();
-      audioAnalyser.current = null;
-    }
-    
-    setIsSpeaking(false);
-  };
-
   // Create audio elements for each track
   useEffect(() => {
     if (!audioRef.current || !audioTracks || audioTracks.length === 0) {
@@ -191,7 +116,8 @@ export const Participant = ({
       className={`participant 
         ${isLocal ? 'local' : 'remote'} 
         ${speaking ? 'speaking' : ''} 
-        ${getRoleClass()}`}
+        ${getRoleClass()}
+        ${!isAlive ? 'eliminated' : ''}`}
       data-identity={participant.identity}
       data-role={role}
     >
@@ -201,6 +127,7 @@ export const Participant = ({
           <span className="avatar-icon">
             {role ? role.charAt(0).toUpperCase() : 'P'}
           </span>
+          {!isAlive && <div className="eliminated-overlay">💀</div>}
         </div>
         <div className="participant-details">
           <span className="participant-name">

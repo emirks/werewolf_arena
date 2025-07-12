@@ -296,8 +296,8 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
       ...prev,
       announcements: [...prev.announcements, { 
         id: message.timestamp || Date.now(), 
-        message: message.text,
-        timestamp: new Date(message.timestamp).toLocaleTimeString()
+        timestamp: new Date(message.timestamp).toLocaleTimeString(),
+        ...message.announcement
       }]
     }));
   }, []);
@@ -426,6 +426,12 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
     );
   }
 
+  // Combine local and remote participants and filter based on game state
+  const allParticipants = [room.localParticipant, ...participants];
+  const visibleParticipants = allParticipants.filter(p => 
+    p && gameState.players.some(player => player.id === p.identity || player.name === p.identity)
+  );
+
   return (
     <div className="game-room">
       <header className="game-header">
@@ -449,7 +455,7 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
       <main className="game-content">
         <section className="participants-section">
           <div className="participants-grid">
-            {participants.map((participant) => {
+            {visibleParticipants.map((participant) => {
               const tracks = Array.from(participantTracks.get(participant.identity) || []);
               const playerState = gameState.players.find(p => p.id === participant.identity || p.name === participant.identity);
               const isCurrentSpeaker = gameState.debate.current_speaker === participant.identity;
@@ -486,17 +492,6 @@ export const GameRoom = ({ roomName, playerName, playerRole, room }) => {
           onToggleMute={toggleMute}
           onDisconnect={() => room.disconnect()}
         />
-
-        {gameState.announcements?.length > 0 && (
-          <div className="announcements">
-            {gameState.announcements.slice(-3).map(announcement => (
-              <div key={announcement.id} className="announcement">
-                <span className="announcement-time">{announcement.timestamp}</span>
-                <span className="announcement-text">{announcement.message}</span>
-              </div>
-            ))}
-          </div>
-        )}
       </footer>
     </div>
   );
