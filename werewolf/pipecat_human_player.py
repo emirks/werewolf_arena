@@ -94,6 +94,7 @@ class PipecatHumanPlayer(Deserializable):
 
         # Connection state
         self._connected = False
+        self._is_human_player_connected = False
 
         self.livekit_url = os.getenv("LIVEKIT_URL")
         self.livekit_api_key = os.getenv("LIVEKIT_API_KEY")
@@ -218,12 +219,33 @@ class PipecatHumanPlayer(Deserializable):
             async def on_disconnected(transport):
                 logger.info(f"{self.name} disconnected from LiveKit")
                 self._connected = False
+            
+            self.human_player_connected_event = asyncio.Event()
 
+            @self._transport.event_handler("on_participant_connected")
+            async def on_participant_connected(transport, participant_identity: str):
+                logger.info(f"Participant {participant_identity} - {self.name}")
+                if participant_identity == self.name:
+                    logger.info(f"Human player {self.name} joined LiveKit")
+                    self._is_human_player_connected = True
+                    self.human_player_connected_event.set()
+                
+            @self._transport.event_handler("on_participant_disconnected")
+            async def on_participant_disconnected(transport, participant_identity: str):
+                if participant_identity == self.name:
+                    logger.info(f"Human player {self.name} left LiveKit")
+                    self._is_human_player_connected = False
+            
             logger.info(f"Pipecat pipeline setup complete for {self.name}")
 
         except Exception as e:
             logger.error(f"Failed to setup Pipecat pipeline for {self.name}: {e}")
             raise
+    
+    async def wait_for_setup(self):
+        """Wait for the pipeline to be fully setup."""
+        await self.connected_event.wait()
+        await self.human_player_connected_event.wait()
 
     async def _on_data_received_bytes(self, data: bytes):
         """Handle incoming data channel messages as bytes."""
@@ -298,11 +320,8 @@ class PipecatHumanPlayer(Deserializable):
     async def disconnect(self):
         """Disconnect from LiveKit and cleanup pipeline."""
         try:
-            if self._pipeline_task:
-                self._pipeline_task.stop()
-
             if self._pipeline_runner:
-                await self._pipeline_runner.stop()
+                await self._pipeline_runner.cancel()
 
             if self._transport:
                 await self._transport.cleanup()
@@ -316,6 +335,10 @@ class PipecatHumanPlayer(Deserializable):
     def is_connected(self) -> bool:
         """Check if connected to LiveKit."""
         return self._connected
+    
+    def is_human_player_connected(self) -> bool:
+        """Check if human player is connected to LiveKit."""
+        return self._is_human_player_connected
 
     async def cleanup(self):
         """Clean up resources."""
@@ -354,7 +377,7 @@ class PipecatHumanPlayer(Deserializable):
                 "id": player,
                 "name": f"{player} (You)" if player == self.name else player,
                 "isAlive": True,  # Assume alive if they're in current_players
-                "role": "unknown",  # Role is hidden from other players in most cases
+                "role": self.previously_unmasked.get(player, "unknown") if self.role == SEER else "unknown",  
             }
             for player in self.gamestate.current_players
         ]
@@ -712,20 +735,27 @@ class PipecatHumanPlayer(Deserializable):
 
         await self.send_data_message(message)
 
-    async def broadcast_announcement(self, announcement: str):
+    async def broadcast_announcement(self, announcement: Dict[str, Any]):
         """Broadcast game announcement through LiveKit data channel."""
         message = create_announcement_message(announcement)
         await self.send_data_message(message)
         # Also add to observations as normal
         self.add_announcement(announcement)
 
-    def reveal_and_update(self, player, role):
+    async def reveal_and_update(self, player, role):
         """Called by the GameMaster when the Human is the Seer to update their state."""
         if self.role == SEER:
             self._add_observation(
                 f"During the night, I decided to investigate {player} and learned they are a {role}."
             )
             self.previously_unmasked[player] = role
+            await self.broadcast_announcement(
+                {
+                    "type": "investigate",
+                    "target": player,
+                    "round": self.gamestate.round_number,
+                }
+            )
 
     def to_dict(self) -> Any:
         return to_dict(self)

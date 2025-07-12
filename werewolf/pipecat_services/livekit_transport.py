@@ -163,6 +163,8 @@ class LiveKitTransportClient:
             if participants and not self._other_participant_has_joined:
                 self._other_participant_has_joined = True
                 await self._callbacks.on_first_participant_joined(participants[0].identity)
+            for participant in participants:
+                await self._callbacks.on_participant_connected(participant.identity)
         except Exception as e:
             logger.error(f"Error connecting to {self._room_name}: {e}")
             raise
@@ -285,15 +287,15 @@ class LiveKitTransportClient:
 
     # Async methods for event handling
     async def _async_on_participant_connected(self, participant: rtc.RemoteParticipant):
-        logger.info(f"Participant connected: {participant.identity}")
-        await self._callbacks.on_participant_connected(participant.sid)
+        # logger.info(f"Participant connected: {participant.identity}")
+        await self._callbacks.on_participant_connected(participant.identity)
         if not self._other_participant_has_joined:
             self._other_participant_has_joined = True
             await self._callbacks.on_first_participant_joined(participant.identity)
 
     async def _async_on_participant_disconnected(self, participant: rtc.RemoteParticipant):
-        logger.info(f"Participant disconnected: {participant.identity}")
-        await self._callbacks.on_participant_disconnected(participant.sid)
+        # logger.info(f"Participant disconnected: {participant.identity}")
+        await self._callbacks.on_participant_disconnected(participant.identity)
         if len(self.get_participants()) == 0:
             self._other_participant_has_joined = False
 
@@ -603,12 +605,12 @@ class LiveKitTransport(BaseTransport):
     async def _on_disconnected(self):
         await self._call_event_handler("on_disconnected")
 
-    async def _on_participant_connected(self, participant_id: str):
-        await self._call_event_handler("on_participant_connected", participant_id)
+    async def _on_participant_connected(self, participant_identity: str):
+        await self._call_event_handler("on_participant_connected", participant_identity)
 
-    async def _on_participant_disconnected(self, participant_id: str):
-        await self._call_event_handler("on_participant_disconnected", participant_id)
-        await self._call_event_handler("on_participant_left", participant_id, "disconnected")
+    async def _on_participant_disconnected(self, participant_identity: str):
+        await self._call_event_handler("on_participant_disconnected", participant_identity)
+        await self._call_event_handler("on_participant_left", participant_identity, "disconnected")
 
     async def _on_audio_track_subscribed(self, participant_id: str):
         await self._call_event_handler("on_audio_track_subscribed", participant_id)

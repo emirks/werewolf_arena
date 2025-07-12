@@ -230,12 +230,9 @@ class PipecatAIPlayer(Deserializable):
             if self._speech_task and not self._speech_task.done():
                 await self._speech_queue.put(None)  # Shutdown signal
                 await self._speech_task
-                
-            if self._pipeline_task:
-                self._pipeline_task.stop()
-                
+
             if self._pipeline_runner:
-                await self._pipeline_runner.stop()
+                await self._pipeline_runner.cancel()
                 
             if self._transport:
                 await self._transport.cleanup()

@@ -96,7 +96,7 @@ async def create_room(request: CreateRoomRequest):
             room_id = generate_room_id()
         
         # Generate unique room name for LiveKit
-        room_name = f"werewolf_game_{uuid.uuid4().hex[:8]}"
+        room_name = request.room_name or f"werewolf_game_{uuid.uuid4().hex[:8]}"
         
         # Store room information
         rooms[room_id] = {
@@ -312,6 +312,10 @@ async def start_game(request: StartGameRequest):
                     await new_player.setup_pipecat_pipeline(room_name)
                 
                 final_players.append(new_player)
+
+        for player in final_players:
+            if isinstance(player, PipecatHumanPlayer):
+                await player.wait_for_setup()
         
         # Organize players by role
         seer = next((p for p in final_players if p.role == SEER), None)
@@ -382,12 +386,35 @@ async def run_game_async(room_name: str, gamemaster: game.GameMaster):
     try:
         winner = await gamemaster.run_game()
         logger.info(f"Game {room_name} completed. Winner: {winner}")
+        
+        # Clean up player connections
+        for player in gamemaster.state.players.values():
+            await player.cleanup()
+        
+        # Clean up room and game state
+        if room_name in active_games:
+            del active_games[room_name]
+            
+        # Find and update room info
+        for room_id, room_info in rooms.items():
+            if room_info["room_name"] == room_name:
+                room_info["game_started"] = False
+                room_info["winner"] = winner
+                break
+                
     except Exception as e:
         logger.error(f"Error running game {room_name}: {e}")
     finally:
-        # Clean up
+        # Ensure cleanup happens even if there's an error
         if room_name in active_games:
             del active_games[room_name]
+            
+        # Try to disconnect any remaining players
+        try:
+            for player in gamemaster.state.players.values():
+                await player.cleanup()
+        except Exception as cleanup_error:
+            logger.error(f"Error during final cleanup: {cleanup_error}")
 
 
 @app.get("/game-status/{room_name}")

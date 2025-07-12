@@ -56,14 +56,16 @@ class GameMaster:
         self.num_threads = num_threads
         self.logs: List[RoundLog] = []
         self.human_player: PipecatHumanPlayer | None = None
+        self.human_players: List[PipecatHumanPlayer] = []  # Track all human players
 
-        # Find human player
+        # Find human players
         for p in self.state.players.values():
             tqdm.tqdm.write(f"Player: {p.name}, Type: {type(p)}")
             if isinstance(p, PipecatHumanPlayer):
-                self.human_player = p
-                tqdm.tqdm.write(f"Human player found: {self.human_player.name}")
-                break
+                self.human_players.append(p)
+                if not self.human_player:  # Keep first human player as primary for backwards compatibility
+                    self.human_player = p
+                tqdm.tqdm.write(f"Human player found: {p.name}")
 
     async def broadcast_to_human(self, message_type: str, data=None):
         """Broadcast message to human player if present."""
@@ -126,7 +128,7 @@ class GameMaster:
 
         if unmask is not None:
             self.this_round.unmasked = unmask
-            self.state.seer.reveal_and_update(unmask, self.state.players[unmask].role)
+            await self.state.seer.reveal_and_update(unmask, self.state.players[unmask].role)
         else:
             raise ValueError("Unmask function did not return a valid player.")
 
@@ -419,6 +421,11 @@ class GameMaster:
             announcement = (
                 f"The majority voted to remove {exiled_player} from the game."
             )
+            ui_announcement = {
+                "type": "vote",
+                "target": exiled_player,
+                "round": self.current_round_num,
+            }
             # Update gamestate for all players first
             for name in self.this_round.players:
                 player = self.state.players[name]
@@ -431,7 +438,11 @@ class GameMaster:
                 "A majority vote was not reached, so no one was removed from the"
                 " game."
             )
-
+            ui_announcement = {
+                "type": "vote",
+                "target": None,
+                "round": self.current_round_num,
+            }
         # Announce to remaining players
         for name in self.this_round.players:
             player = self.state.players[name]
@@ -440,7 +451,7 @@ class GameMaster:
         tqdm.tqdm.write(announcement)
 
         # Broadcast to human player through LiveKit
-        await self.broadcast_to_human("announcement", announcement)
+        await self.broadcast_to_human("announcement", ui_announcement)
 
     async def resolve_night_phase(self):
         """Resolve elimination and protection during the night phase."""
@@ -452,6 +463,11 @@ class GameMaster:
                 f"The Werewolves removed {eliminated_player} from the game during the"
                 " night."
             )
+            ui_announcement = {
+                "type": "kill",
+                "target": eliminated_player,
+                "round": self.current_round_num,
+            }
             # Update gamestate for all players first
             for name in self.this_round.players:
                 player = self.state.players[name]
@@ -461,7 +477,11 @@ class GameMaster:
             self.this_round.players.remove(eliminated_player)
         else:
             announcement = "No one was removed from the game during the night."
-
+            ui_announcement = {
+                "type": "kill",
+                "target": None,
+                "round": self.current_round_num,
+            }
         tqdm.tqdm.write(announcement)
 
         # Announce to remaining players
@@ -470,7 +490,7 @@ class GameMaster:
             player.add_announcement(announcement)
 
         # Broadcast to human player through LiveKit
-        await self.broadcast_to_human("announcement", announcement)
+        await self.broadcast_to_human("announcement", ui_announcement)
 
     async def run_round(self):
         """Run a single round of the game."""
@@ -518,6 +538,9 @@ class GameMaster:
                 tqdm.tqdm.write(f"Round {self.current_round_num} is complete.")
                 self.this_round.success = True
                 return
+            if not self.check_human_players_connected():
+                # if all human players disconnected, end the round
+                return
 
         tqdm.tqdm.write(f"Round {self.current_round_num} is complete.")
         self.this_round.success = True
@@ -538,9 +561,23 @@ class GameMaster:
         if self.state.winner:
             tqdm.tqdm.write(f"The winner is {self.state.winner}!")
 
+    def check_human_players_connected(self) -> bool:
+        """Check if any human players are still connected to the game."""
+        if not self.human_players:
+            return True  # If no human players, return True to continue game
+        
+        connected_humans = [p for p in self.human_players if p.is_human_player_connected()]
+        return len(connected_humans) > 0
+
     async def run_game(self) -> str:
         """Run the entire Werewolf game and return the winner."""
         while not self.state.winner:
+            # Check if any human players are still connected
+            if not self.check_human_players_connected():
+                tqdm.tqdm.write("All human players disconnected. Ending game.")
+                self.state.winner = "Game Aborted - All Players Disconnected"
+                break
+
             tqdm.tqdm.write(f"STARTING ROUND: {self.current_round_num}")
             await self.run_round()
             for name in self.this_round.players:
@@ -549,7 +586,7 @@ class GameMaster:
                         self.current_round_num + 1
                     )
                     self.state.players[name].gamestate.clear_debate()
-            self.current_round_num += 1
+            self.current_round_num += 1            
 
         tqdm.tqdm.write("Game is complete!")
         return self.state.winner

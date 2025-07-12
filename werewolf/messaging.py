@@ -55,10 +55,10 @@ def create_user_action_message(
         message["timeout"] = timeout
     return message
 
-def create_announcement_message(text: str) -> Dict[str, Any]:
+def create_announcement_message(announcement: Dict[str, Any]) -> Dict[str, Any]:
     """Create a standardized announcement message"""
     return {
         "type": MessageType.ANNOUNCEMENT.value,
-        "text": text,
+        "announcement": announcement,
         "timestamp": int(time.time() * 1000)
     } 
