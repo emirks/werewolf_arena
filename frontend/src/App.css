@@ -45,18 +45,34 @@ body {
   line-height: 1.5;
 }
 
+html, body, #root {
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+  min-width: 100vw;
+  margin: 0;
+  padding: 0;
+}
+
 /* Container styles */
 .app-container {
   min-height: 100vh;
+  min-width: 100vw;
+  width: 100vw;
+  height: 100vh;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--spacing-md);
+  flex-direction: column;
 }
 
 .app-container.game-mode {
   padding: 0;
   background-color: var(--background-color);
+  width: 100vw;
+  height: 100vh;
+  min-width: 100vw;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Setup panel styles */
@@ -232,9 +248,7 @@ body {
 }
 
 .room-info {
-  margin-top: var(--spacing-lg);
   padding: var(--spacing-md);
-  background-color: var(--background-color);
   border-radius: var(--radius-md);
 }
 
@@ -293,7 +307,7 @@ body {
 .player-name {
   font-weight: 500;
   font-size: 1rem;
-  color: var(--text-primary);
+  /* color: var(--text-primary); */
 }
 
 .player-status {
